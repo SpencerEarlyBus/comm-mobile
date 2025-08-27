@@ -1,24 +1,26 @@
+// src/screens/LoginScreen.tsx
 import React, { useState } from 'react';
 import { View, TextInput, Button, Alert, Text } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
-import { api } from '../api/api';
+import { useAuth } from '../context/MobileAuthContext';
 
 export default function LoginScreen({ navigation }: any) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const { loginWithPassword } = useAuth();
 
   const onLogin = async () => {
     try {
       setBusy(true);
-      const { data } = await api.post('/api/login-mobile', { email, password });
-      await SecureStore.setItemAsync('access_token', data.access);
-      await SecureStore.setItemAsync('refresh_token', data.refresh);
-      // you can store user payload if you want:
-      await SecureStore.setItemAsync('user_email', data.user?.email ?? '');
+      const ok = await loginWithPassword(email.trim(), password);
+      if (!ok) {
+        Alert.alert('Login failed', 'Invalid credentials');
+        return;
+      }
+      // Tokens + profile are saved by the context.
       navigation.replace('Sessions');
     } catch (e: any) {
-      Alert.alert('Login failed', e?.response?.data?.error ?? e?.message ?? 'Unknown error');
+      Alert.alert('Login failed', e?.message ?? 'Unknown error');
     } finally {
       setBusy(false);
     }
