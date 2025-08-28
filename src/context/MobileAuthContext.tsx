@@ -10,15 +10,18 @@ const PROFILE_KEY = 'comm_profile';
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://your.api.domain/api';
 
 type Profile = {
-    email: string;
-    username?: string;
-    role?: string;
-    leaderboard_permissions?: string[];
-    leaderboard_preference?: any;
-    report_preference?: any;
-    phrase_sentence?: string;
-    unique_fillers?: string[];
-    email_verified?: boolean;
+  id?: string;
+  email: string;
+  username?: string;
+  role?: string;
+  created_at?: string;                 // ← add
+  leaderboard_permissions?: string[];
+  leaderboard_preference?: any;
+  report_preference?: any;
+  phrase_sentence?: string;
+  unique_fillers?: string[];
+  unique_gesture_csv_path?: string;    // ← add
+  email_verified?: boolean;
 };
 
 type Ctx = {
@@ -63,6 +66,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     })();
   }, []);
+
+
+
+
 
   const persist = useCallback(async (access: string, refresh: string, profile?: Profile) => {
     accessRef.current = access;
@@ -180,7 +187,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return res;
     }, [refreshAccess, logout]);
 
-
+  const getValidAccessToken = useCallback(async (): Promise<string | null> => {
+    if (accessRef.current) return accessRef.current;
+    const ok = await refreshAccess();
+    return ok ? accessRef.current : null;
+  }, [refreshAccess]);
 
     const updateUser = useCallback(async (patch: Partial<Profile>) => {
     setUser(prev => {
@@ -198,17 +209,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     }, []);
 
-  const value = useMemo<Ctx & { getAccessToken: () => string | null }>(() => ({
+  const value = useMemo(() => ({
     user,
     authReady,
     isAuthenticated: !!user?.email,
     loginWithPassword,
-    signupWithPassword, 
+    signupWithPassword,
     logout,
     fetchWithAuth,
     updateUser,
-    getAccessToken,                      
-  }), [user, authReady, loginWithPassword, logout, fetchWithAuth, updateUser, getAccessToken]);
+    getValidAccessToken,   
+  }), [
+    user, authReady, loginWithPassword, signupWithPassword, logout,
+    fetchWithAuth, updateUser, getValidAccessToken
+  ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -1,7 +1,24 @@
 // src/screens/HomeScreen.tsx
-import React, { useState } from 'react';
-import { View, Text, Image, Pressable, TextInput, Button, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useMemo, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  Image,
+  Pressable,
+  TextInput,
+  Button,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  ScrollView,
+  Keyboard,
+  TouchableWithoutFeedback,
+  InputAccessoryView,
+  ActivityIndicator,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/MobileAuthContext';
 import { useNavigation } from '@react-navigation/native';
 
@@ -9,192 +26,455 @@ type Mode = 'login' | 'signup';
 
 export default function HomeScreen() {
   const nav = useNavigation<any>();
-  const { authReady, isAuthenticated, user, loginWithPassword, signupWithPassword, logout } = useAuth() as any;
+  const insets = useSafeAreaInsets();
+  const {
+    authReady,
+    isAuthenticated,
+    user,
+    loginWithPassword,
+    signupWithPassword,
+    logout,
+  } = useAuth() as any;
 
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showPwd, setShowPwd] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // refs for "Next" key flow
+  const usernameRef = useRef<TextInput>(null);
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+
+  const accessoryId = useMemo(() => 'authAccessory', []);
+
+  const validate = () => {
+    setError(null);
+    const e = email.trim();
+    if (!e) return 'Email is required';
+    if (!/^\S+@\S+\.\S+$/.test(e)) return 'Enter a valid email';
+    if (!password) return 'Password is required';
+    if (password.length < 6) return 'Password must be at least 6 characters';
+    return null;
+  };
 
   const onLogin = async () => {
+    const err = validate();
+    if (err) return setError(err);
     try {
       setBusy(true);
       const ok = await loginWithPassword(email.trim(), password);
-      if (!ok) return Alert.alert('Login failed', 'Check your credentials.');
+      if (!ok) {
+        setError('Incorrect email or password.');
+        return;
+      }
       nav.reset({ index: 0, routes: [{ name: 'Sessions' }] });
-    } finally { setBusy(false); }
+    } catch (e: any) {
+      Alert.alert('Login failed', e?.message || 'Unknown error');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const onSignup = async () => {
+    const err = validate();
+    if (err) return setError(err);
     try {
       setBusy(true);
       const ok = await signupWithPassword(email.trim(), password, username.trim());
-      if (!ok) return Alert.alert('Sign up failed', 'Unable to create account.');
+      if (!ok) {
+        setError('Unable to create account.');
+        return;
+      }
       nav.reset({ index: 0, routes: [{ name: 'Sessions' }] });
-    } finally { setBusy(false); }
+    } catch (e: any) {
+      Alert.alert('Sign up failed', e?.message || 'Unknown error');
+    } finally {
+      setBusy(false);
+    }
   };
 
+  const submit = mode === 'login' ? onLogin : onSignup;
+
   return (
-    <View style={{ flex: 1 }}>
+    <View style={styles.root}>
+      {/* Gradient BG */}
       <LinearGradient
         colors={['#0ea5e9', '#6366f1', '#8b5cf6']}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={{ position: 'absolute', inset: 0 }}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
       />
+
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: undefined })}
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 48 + insets.top : 0}
       >
-        <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 80, alignItems: 'center' }}>
-          <Image
-            source={require('../../assets/heading.png')}
-            resizeMode="contain"
-            style={{ width: '85%', height: 120, marginBottom: 12 }}
-          />
-          <Text style={{ textAlign: 'center', color: 'white', fontSize: 18, opacity: 0.9 }}>
-            Measure, improve, and showcase your communication performance.
-          </Text>
-
-          {/* Glass card */}
-          <View
-            style={{
-              marginTop: 28,
-              width: '100%',
-              backgroundColor: 'rgba(255,255,255,0.12)',
-              borderColor: 'rgba(255,255,255,0.25)',
-              borderWidth: 1,
-              padding: 18,
-              borderRadius: 20,
-            }}
+        {/* tap anywhere outside to dismiss */}
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <ScrollView
+            contentContainerStyle={[styles.scroll, { paddingTop: 48 + insets.top, paddingBottom: 24 + insets.bottom }]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'on-drag' : 'interactive'}
           >
-            {authReady && isAuthenticated ? (
-              <>
-                <Text style={{ color: 'white', fontSize: 16 }}>
-                  Signed in as <Text style={{ fontWeight: '700' }}>{user?.email}</Text>
-                </Text>
-                <View style={{ height: 12 }} />
-                <PrimaryButton label="Continue to Sessions" onPress={() => nav.navigate('Sessions')} />
-                <View style={{ height: 10 }} />
-                <SecondaryButton label="Log out" onPress={async () => {
-                  await logout();
-                  // stay on Home
-                }} />
-              </>
-            ) : (
-              <>
-                {/* Tabs */}
-                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-                  <TabButton active={mode === 'login'} label="Log in" onPress={() => setMode('login')} />
-                  <TabButton active={mode === 'signup'} label="Sign up" onPress={() => setMode('signup')} />
-                </View>
+            <View style={styles.container}>
+              <Image
+                source={require('../../assets/heading.png')}
+                resizeMode="contain"
+                style={styles.logo}
+              />
+              <Text style={styles.hero}>
+                Measure, improve, and showcase your communication performance.
+              </Text>
 
-                {/* Forms */}
-                <View style={{ gap: 10 }}>
-                  {mode === 'signup' && (
-                    <TextInput
-                      placeholder="Username (optional)"
-                      placeholderTextColor="rgba(255,255,255,0.8)"
-                      value={username}
-                      onChangeText={setUsername}
-                      autoCapitalize="none"
-                      style={inputStyle}
+              {/* Card */}
+              <View style={styles.card}>
+                {authReady && isAuthenticated ? (
+                  <>
+                    <Text style={styles.cardText}>
+                      Signed in as <Text style={styles.bold}>{user?.email}</Text>
+                    </Text>
+                    <View style={styles.sp12} />
+                    <PrimaryButton
+                      label="Continue to Sessions"
+                      onPress={() => nav.navigate('Sessions')}
+                      disabled={busy}
                     />
-                  )}
-                  <TextInput
-                    placeholder="Email"
-                    placeholderTextColor="rgba(255,255,255,0.8)"
-                    value={email}
-                    onChangeText={setEmail}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    style={inputStyle}
-                  />
-                  <TextInput
-                    placeholder="Password"
-                    placeholderTextColor="rgba(255,255,255,0.8)"
-                    value={password}
-                    onChangeText={setPassword}
-                    secureTextEntry
-                    style={inputStyle}
-                  />
-                  <Button
-                    title={busy ? (mode === 'login' ? 'Signing in…' : 'Creating…') : (mode === 'login' ? 'Log in' : 'Sign up')}
-                    onPress={mode === 'login' ? onLogin : onSignup}
-                    disabled={busy}
-                  />
-                </View>
-              </>
-            )}
-          </View>
+                    <View style={styles.sp10} />
+                    <SecondaryButton
+                      label="Log out"
+                      onPress={async () => {
+                        setBusy(true);
+                        try {
+                          await logout();
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      disabled={busy}
+                    />
+                  </>
+                ) : (
+                  <>
+                    {/* Tabs */}
+                    <View style={styles.tabsRow}>
+                      <TabButton
+                        active={mode === 'login'}
+                        label="Log in"
+                        onPress={() => {
+                          setMode('login');
+                          setError(null);
+                        }}
+                      />
+                      <View style={styles.spH8} />
+                      <TabButton
+                        active={mode === 'signup'}
+                        label="Sign up"
+                        onPress={() => {
+                          setMode('signup');
+                          setError(null);
+                        }}
+                      />
+                    </View>
 
-          {/* Footer */}
-          <Text style={{ position: 'absolute', bottom: 24, color: 'white', opacity: 0.8 }}>
-            © {new Date().getFullYear()} Comm
-          </Text>
-        </View>
+                    {/* Error */}
+                    {!!error && (
+                      <>
+                        <Text style={styles.errorText}>{error}</Text>
+                        <View style={styles.sp10} />
+                      </>
+                    )}
+
+                    {/* Form */}
+                    <View>
+                      {mode === 'signup' && (
+                        <>
+                          <TextInput
+                            ref={usernameRef}
+                            placeholder="Username (optional)"
+                            placeholderTextColor="rgba(255,255,255,0.8)"
+                            value={username}
+                            onChangeText={setUsername}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                            textContentType="username"
+                            style={styles.input}
+                            inputAccessoryViewID={Platform.OS === 'ios' ? accessoryId : undefined}
+                            returnKeyType="next"
+                            blurOnSubmit={false}
+                            onSubmitEditing={() => emailRef.current?.focus()}
+                          />
+                          <View style={styles.sp10} />
+                        </>
+                      )}
+                      <TextInput
+                        ref={emailRef}
+                        placeholder="Email"
+                        placeholderTextColor="rgba(255,255,255,0.8)"
+                        value={email}
+                        onChangeText={setEmail}
+                        keyboardType="email-address"
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        textContentType="emailAddress"
+                        style={styles.input}
+                        inputAccessoryViewID={Platform.OS === 'ios' ? accessoryId : undefined}
+                        returnKeyType="next"
+                        blurOnSubmit={false}
+                        onSubmitEditing={() => passwordRef.current?.focus()}
+                      />
+                      <View style={styles.sp10} />
+
+                      {/* Password field with show/hide */}
+                      <View style={styles.pwdRow}>
+                        <TextInput
+                          ref={passwordRef}
+                          placeholder="Password"
+                          placeholderTextColor="rgba(255,255,255,0.8)"
+                          value={password}
+                          onChangeText={setPassword}
+                          secureTextEntry={!showPwd}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          textContentType="password"
+                          style={[styles.input, styles.pwdInput]}
+                          inputAccessoryViewID={Platform.OS === 'ios' ? accessoryId : undefined}
+                          returnKeyType="done"
+                          blurOnSubmit
+                          onSubmitEditing={submit}
+                        />
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={showPwd ? 'Hide password' : 'Show password'}
+                          onPress={() => setShowPwd((s) => !s)}
+                          style={({ pressed }) => [styles.eyeBtn, pressed && styles.eyeBtnPressed]}
+                        >
+                          <Text style={styles.eyeText}>{showPwd ? 'Hide' : 'Show'}</Text>
+                        </Pressable>
+                      </View>
+
+                      <View style={styles.sp12} />
+
+                      {/* Submit + spinner */}
+                      {busy ? (
+                        <View style={styles.spinnerWrap}>
+                          <ActivityIndicator color="#fff" />
+                        </View>
+                      ) : (
+                        <Button
+                          title={mode === 'login' ? 'Log in' : 'Sign up'}
+                          onPress={submit}
+                          disabled={busy}
+                        />
+                      )}
+
+                      <View style={styles.sp10} />
+                      <Text style={styles.hintText}>
+                        By continuing you agree to our Terms and Privacy Policy.
+                      </Text>
+                    </View>
+                  </>
+                )}
+              </View>
+
+              {/* Footer */}
+              <Text style={styles.footer}>
+                © {String(new Date().getFullYear())} Comm
+              </Text>
+            </View>
+          </ScrollView>
+        </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+
+      {/* iOS keyboard accessory */}
+      {Platform.OS === 'ios' && (
+        <InputAccessoryView nativeID={accessoryId}>
+          <View style={styles.accessoryBar}>
+            <Pressable onPress={Keyboard.dismiss} hitSlop={8} style={styles.doneBtn}>
+              <Text style={styles.doneText}>Done</Text>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      )}
     </View>
   );
 }
 
-function TabButton({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) {
+function TabButton({
+  active,
+  label,
+  onPress,
+}: {
+  active: boolean;
+  label: string;
+  onPress: () => void;
+}) {
   return (
     <Pressable
       onPress={onPress}
-      style={{
-        flex: 1,
-        paddingVertical: 10,
-        borderRadius: 12,
-        borderWidth: active ? 0 : 1,
-        borderColor: 'rgba(255,255,255,0.5)',
-        backgroundColor: active ? 'white' : 'transparent',
-        alignItems: 'center',
-      }}
+      style={[styles.tabBtn, active ? styles.tabBtnActive : styles.tabBtnInactive]}
     >
-      <Text style={{ color: active ? '#0f172a' : 'white', fontWeight: '700' }}>{label}</Text>
+      <Text style={[styles.tabText, active ? styles.tabTextActive : styles.tabTextInactive]}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
 
-function PrimaryButton({ label, onPress }: { label: string; onPress: () => void }) {
+function PrimaryButton({
+  label,
+  onPress,
+  disabled,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => ({
-        paddingVertical: 14,
-        borderRadius: 16,
-        backgroundColor: pressed ? 'rgba(255,255,255,0.75)' : 'white',
-        alignItems: 'center',
-      })}
+      disabled={disabled}
+      style={({ pressed }) => [
+        styles.primaryBtn,
+        pressed && styles.primaryBtnPressed,
+        disabled && { opacity: 0.6 },
+      ]}
     >
-      <Text style={{ color: '#0f172a', fontWeight: '700', fontSize: 16 }}>{label}</Text>
-    </Pressable>
-  );
-}
-function SecondaryButton({ label, onPress }: { label: string; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        paddingVertical: 14,
-        borderRadius: 16,
-        borderWidth: 2,
-        borderColor: 'white',
-        backgroundColor: pressed ? 'rgba(255,255,255,0.12)' : 'transparent',
-        alignItems: 'center',
-      })}
-    >
-      <Text style={{ color: 'white', fontWeight: '700', fontSize: 16 }}>{label}</Text>
+      <Text style={styles.primaryText}>{label}</Text>
     </Pressable>
   );
 }
 
-const inputStyle = {
-  borderWidth: 1,
-  borderColor: 'rgba(255,255,255,0.35)',
-  backgroundColor: 'rgba(255,255,255,0.12)',
-  color: 'white',
-  padding: 12,
-  borderRadius: 12,
-} as const;
+function SecondaryButton({
+  label,
+  onPress,
+  disabled,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => [
+        styles.secondaryBtn,
+        pressed && styles.secondaryBtnPressed,
+        disabled && { opacity: 0.6 },
+      ]}
+    >
+      <Text style={styles.secondaryText}>{label}</Text>
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  flex: { flex: 1 },
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  container: { width: '100%', alignItems: 'center' },
+  logo: { width: '85%', height: 120, marginBottom: 12 },
+  hero: { textAlign: 'center', color: 'white', fontSize: 18, opacity: 0.9 },
+
+  card: {
+    marginTop: 28,
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.25)',
+    borderWidth: 1,
+    padding: 18,
+    borderRadius: 20,
+  },
+  cardText: { color: 'white', fontSize: 16 },
+  bold: { fontWeight: '700', color: 'white' },
+
+  tabsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  tabBtn: { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center' },
+  tabBtnActive: { backgroundColor: 'white' },
+  tabBtnInactive: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)' },
+  tabText: { fontWeight: '700' },
+  tabTextActive: { color: '#0f172a' },
+  tabTextInactive: { color: 'white' },
+
+  input: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    color: 'white',
+    padding: 12,
+    borderRadius: 12,
+  },
+
+  pwdRow: { flexDirection: 'row', alignItems: 'center' },
+  pwdInput: { flex: 1, paddingRight: 64 },
+  eyeBtn: {
+    position: 'absolute',
+    right: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  eyeBtnPressed: { backgroundColor: 'rgba(255,255,255,0.12)' },
+  eyeText: { color: 'white', fontWeight: '600' },
+
+  primaryBtn: {
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: 'white',
+    alignItems: 'center',
+  },
+  primaryBtnPressed: { backgroundColor: 'rgba(255,255,255,0.75)' },
+  primaryText: { color: '#0f172a', fontWeight: '700', fontSize: 16 },
+
+  secondaryBtn: {
+    paddingVertical: 14,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: 'white',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+  },
+  secondaryBtnPressed: { backgroundColor: 'rgba(255,255,255,0.12)' },
+  secondaryText: { color: 'white', fontWeight: '700', fontSize: 16 },
+
+  spinnerWrap: { paddingVertical: 8, alignItems: 'center' },
+
+  errorText: {
+    color: '#fecaca',
+    backgroundColor: 'rgba(239, 68, 68, 0.18)',
+    borderColor: 'rgba(239, 68, 68, 0.35)',
+    borderWidth: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+
+  hintText: { color: 'rgba(255,255,255,0.75)', fontSize: 12, textAlign: 'center' },
+
+  footer: { marginTop: 24, color: 'white', opacity: 0.8 },
+
+  // spacers
+  sp10: { height: 10 },
+  sp12: { height: 12 },
+  spH8: { width: 8 },
+
+  // iOS accessory
+  accessoryBar: {
+    backgroundColor: '#f8fafc',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: '#e5e7eb',
+    padding: 8,
+    alignItems: 'flex-end',
+  },
+  doneBtn: { paddingHorizontal: 12, paddingVertical: 8 },
+  doneText: { color: '#2563eb', fontWeight: '600' },
+});

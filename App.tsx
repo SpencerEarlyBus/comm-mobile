@@ -1,43 +1,54 @@
 // App.tsx
-import React from 'react';
+import React, { useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { AuthProvider } from './src/context/MobileAuthContext';
 import { MenuProvider } from './src/context/MenuContext';
 import MenuPortal from './src/components/MenuPortal';
-import { HeaderHamburger, HeaderUser } from './src/components/HeaderButtons';
+import FooterNav from './src/components/FooterNav';
+import { navigationRef } from './src/navigation/navRef';   // ← add
 
 import HomeScreen from './src/screens/HomeScreen';
-import LoginScreen from './src/screens/LoginScreen';
-import SignupScreen from './src/screens/SignupScreen';
 import AuthedSessionsScreen from './src/screens/AuthedSessionsScreen';
 import AuthedRecorderScreen from './src/screens/AuthedRecorderScreen';
+import LeaderboardScreen from './src/screens/LeaderboardScreen';
+import TopicsTodayScreen from './src/screens/TopicsTodayScreen';
+import ProfileScreen from './src/screens/ProfileScreen';
 
 const Stack = createNativeStackNavigator();
 const qc = new QueryClient();
 
 export default function App() {
+  const [routeName, setRouteName] = useState<string | undefined>();
+
   return (
-    <AuthProvider>
-      <MenuProvider>
-        <QueryClientProvider client={qc}>
-          <NavigationContainer>
-            <MenuPortal /> {/* global modal(s) */}
-            <Stack.Navigator
-              initialRouteName="Home"
-              screenOptions={{
-                headerLeft: () => <HeaderHamburger />,
-                headerRight: () => <HeaderUser />,
-              }}
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+      <AuthProvider>
+        <MenuProvider>
+          <QueryClientProvider client={qc}>
+            <NavigationContainer
+              ref={navigationRef}
+              onReady={() => setRouteName(navigationRef.getCurrentRoute()?.name)}
+              onStateChange={() => setRouteName(navigationRef.getCurrentRoute()?.name)}
             >
-              <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Comm Mobile', headerBackVisible: false }} />
-              <Stack.Screen name="Sessions" component={AuthedSessionsScreen} options={{ title: 'Sessions' }} />
-              <Stack.Screen name="Recorder" component={AuthedRecorderScreen} options={{ title: 'Recorder' }} />
-            </Stack.Navigator>
-          </NavigationContainer>
-        </QueryClientProvider>
-      </MenuProvider>
-    </AuthProvider>
+              <MenuPortal />
+              <Stack.Navigator initialRouteName="Home" screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="Home" component={HomeScreen} />
+                <Stack.Screen name="Sessions" component={AuthedSessionsScreen} />
+                <Stack.Screen name="Recorder" component={AuthedRecorderScreen} />
+                <Stack.Screen name="Profile" component={ProfileScreen} />
+                <Stack.Screen name="Leaderboard" component={LeaderboardScreen} />    
+                <Stack.Screen name="TopicsToday" component={TopicsTodayScreen} />     
+              </Stack.Navigator>
+
+              {/* Persistent footer (no hooks) */}
+              <FooterNav currentRoute={routeName} />
+            </NavigationContainer>
+          </QueryClientProvider>
+        </MenuProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
