@@ -17,7 +17,7 @@ const DEFAULT_TOPICS = [
   'Tell me about yourself',
   'Why this role?',
   'Strengths & weaknesses',
-  'A time you solved a problem',
+  'What are quadratics?',
 ];
 
 export default function RecorderScreen() {
