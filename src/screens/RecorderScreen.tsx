@@ -13,10 +13,9 @@ import { useAuth } from '../context/MobileAuthContext';
 type Status = 'granted' | 'denied' | 'undetermined' | 'restricted' | 'unknown';
 
 const DEFAULT_TOPICS = [
-  'Elevator pitch',
-  'Tell me about yourself',
-  'Why this role?',
-  'Strengths & weaknesses',
+  'Explain human evolution',
+  'Discuss the fall of the Roman Empire',
+  'What are the implications of lowering interest rates?',
   'What are quadratics?',
 ];
 

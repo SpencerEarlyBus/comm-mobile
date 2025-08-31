@@ -15,5 +15,7 @@ export default {
     extra: {
       apiBase: process.env.EXPO_PUBLIC_API_BASE,
     },
+
+    plugins: ['expo-video'],
   },
 };
