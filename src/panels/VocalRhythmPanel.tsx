@@ -19,11 +19,13 @@ const VocalRhythmPanel: React.FC<PanelProps> = ({ sessionId }) => {
         }}
       >
         <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }}>
-          Vocal rhythm
+          Vocal Pace
         </Text>
         <Text style={{ marginTop: 6, color: '#475569' }}>
-          Your pacing, pauses, and cadence shape how listeners follow your ideas.
-          Use these notes to spot rushing, monotone stretches, and effective pauses.
+          This metric assesses your ability to speak at an effective and interpretable pace 
+          (130-160 words per minute). It also considers your presentation cadence over time and 
+          scores based on consistency (e.g. speaking quite fast in some areas, while slow in others, 
+          resulting in distracting vocal patterns). 
         </Text>
       </View>
 

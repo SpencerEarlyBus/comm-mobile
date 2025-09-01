@@ -22,8 +22,8 @@ const ContentRelevancePanel: React.FC<PanelProps> = ({ sessionId }) => {
           Content relevance
         </Text>
         <Text style={{ marginTop: 6, color: '#475569' }}>
-          These notes reflect how closely your spoken content tracked the prompt/topic.
-          Review the generated analysis below for mismatches, drift, and suggested anchors.
+          This metric assesses how relevant the presentation was with respect to the topic provided. 
+          It considers your directness, use of examples, focus, coverage, and accuracy.   
         </Text>
       </View>
 

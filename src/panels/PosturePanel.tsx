@@ -50,9 +50,11 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
   return (
     <View style={{ marginHorizontal: 16, marginTop: 10 }}>
       <View style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, backgroundColor: '#fff', padding: 14, marginBottom: 10 }}>
-        <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }}>Posture Analysis</Text>
+        <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }}>Posture</Text>
         <Text style={{ marginTop: 6, color: '#475569' }}>
-          Review your hand usage, symmetry, and gesture timing. Aim for purposeful gestures that match your points.
+          This metric assesses your overall posture and hand placement. Standing up straight and managing 
+          your hands outside your shoulder width will be scored positively. Keeping your hands below your 
+          waist or in front of your body will reduce your score. 
         </Text>
       </View>
 

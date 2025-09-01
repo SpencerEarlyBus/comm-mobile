@@ -79,7 +79,7 @@ export default function FooterNav({ currentRoute }: Props) {
         {/* 4. Topics */}
         <NavSlot>
           <TabButton
-            label="Topics"
+            label="Explore"
             active={isActive('TopicsToday')}
             iconActive="bulb"
             iconInactive="bulb-outline"

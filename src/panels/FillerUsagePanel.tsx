@@ -22,8 +22,9 @@ const FillerUsagePanel: React.FC<PanelProps> = ({ sessionId }) => {
           Filler Usage
         </Text>
         <Text style={{ marginTop: 6, color: '#475569' }}>
-          Your pacing, pauses, and cadence shape how listeners follow your ideas.
-          Use these notes to spot rushing, monotone stretches, and effective pauses.
+          This metric assesses your ability to refrain from using verbal fillers within your presentation 
+          (e.g. “um”, “uh”, etc.). These verbal distractions take away from the material your presentation 
+          and foster less engagement within your audience. 
         </Text>
       </View>
 

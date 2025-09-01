@@ -1,13 +1,15 @@
+// features/sessions/SessionsScreen.tsx
 import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import {
   View,
   Text,
   ScrollView,
   Alert,
-  ActivityIndicator,
   Pressable,
-  Linking,
+  RefreshControl,
+  StyleSheet,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/MobileAuthContext';
 import HeaderBar from '../components/HeaderBar';
@@ -17,9 +19,14 @@ import { PANEL_REGISTRY } from '../panels/PanelRegistry';
 import type { PanelKey } from '../panels/Panel.types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FOOTER_BAR_HEIGHT } from '../components/FooterNav';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useIsFocused } from '@react-navigation/native';
+import { AppState } from 'react-native';
+import { focusManager } from '@tanstack/react-query';
 
 
-
+import Card from '../components/Card';
+import { C, S } from '../theme/tokens'; // { colors, spacing, radii }, adjust path if needed
 
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://your.api.domain';
 
@@ -42,7 +49,7 @@ const METRIC_KEYS: { key: string; label: string }[] = [
   { key: 'vocal_expressiveness',  label: 'Expressive' },
   { key: 'interpretability',      label: 'Interpretable' },
   { key: 'filler_usage',          label: 'Fillers' },
-  { key: 'gesture_score',         label: 'Gesture' },   // target dial
+  { key: 'gesture_score',         label: 'Gesture' },
   { key: 'posture_score',         label: 'Posture' },
   { key: 'motion_score',          label: 'Motion' },
 ];
@@ -73,70 +80,129 @@ function getMetricValue(session: MobileSession | undefined, key: string): number
 
 /** --- Cards --- */
 function SessionSummaryCard({ s }: { s: MobileSession }) {
-  return (
-    <View
-      style={{
-        marginHorizontal: 16, marginTop: 6,
-        borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12,
-        backgroundColor: '#ffffff', padding: 12,
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-      }}
-    >
-      <View style={{ flex: 1, paddingRight: 12 }}>
-        <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }} numberOfLines={1}>
-          {s.topic || 'Session'}
-        </Text>
-        <Text style={{ color: '#64748b', marginTop: 4 }} numberOfLines={1}>
-          {formatDate(s.created_at)}{s.leaderboard_tag ? ` • ${s.leaderboard_tag}` : ''}
-        </Text>
-      </View>
+  const score = Math.max(0, Math.min(100, Number(s.overall_score ?? 0)));
+  let tier = 'Rising';
+  if (score >= 90) tier = 'Legend';
+  else if (score >= 80) tier = 'Elite';
+  else if (score >= 70) tier = 'Giga Aura';
+  else if (score >= 60) tier = 'Advanced';
 
-      <MetricDial
-        label="Overall"
-        value={Math.max(0, Math.min(100, Number(s.overall_score ?? 0)))}
-        size={84}
-        stroke={8}
-        active={false}
-      />
-    </View>
+  return (
+    <Card style={{ marginHorizontal: S.md, marginTop: S.sm, padding: S.md }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <View style={{ flex: 1, paddingRight: S.md }}>
+          <Text style={styles.h2} numberOfLines={1}>
+            {s.topic || 'Session'}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+            <Text style={styles.subtle} numberOfLines={1}>
+              {formatDate(s.created_at)}{s.leaderboard_tag ? ` • ${s.leaderboard_tag}` : ''}
+            </Text>
+            {/* tiny chip */}
+            <View style={{ marginLeft: 8, paddingVertical: 2, paddingHorizontal: 8, borderRadius: 999, backgroundColor: C.accent }}>
+              <Text style={{ color: C.bg, fontWeight: '700', fontSize: 12 }}>{tier}</Text>
+            </View>
+          </View>
+        </View>
+
+        <MetricDial
+          label="Overall"
+          value={score}
+          size={84}
+          stroke={8}
+          active={false}
+        />
+      </View>
+    </Card>
+  );
+}
+
+function LeaderboardAdjustmentsCard({ s }: { s: MobileSession }) {
+  const score = Math.max(0, Math.min(100, Number(s.overall_score ?? 0)));
+  let tier = 'Rising';
+  if (score >= 90) tier = 'Legend';
+  else if (score >= 80) tier = 'Elite';
+  else if (score >= 70) tier = 'Pro';
+  else if (score >= 60) tier = 'Advanced';
+
+  return (
+    <Card style={{ marginHorizontal: S.md, marginTop: S.md, padding: S.md }}>
+      <Text style={styles.h2}>Leaderboard impact</Text>
+
+      <Text style={[styles.body, { marginTop: S.xs }]}>
+        This session’s overall score is <Text style={styles.semibold}>{score}</Text>. You’re tracking in the{' '}
+        <Text style={styles.semibold}>{tier}</Text> bracket
+        {s.leaderboard_tag ? (
+          <> for <Text style={styles.semibold}>{s.leaderboard_tag}</Text>.</>
+        ) : '.'}
+      </Text>
+
+      <Text style={[styles.subtle, { marginTop: S.xs }]}>
+        Keep improving your weakest dial to climb faster. Scores above 80 typically boost placement within 1–2 refresh cycles.
+      </Text>
+
+      <View style={{ flexDirection: 'row', columnGap: 10, marginTop: S.sm }}>
+        <Pressable
+          onPress={() => Alert.alert('Leaders', 'Leaderboard screen coming soon!')}
+          style={({ pressed }) => [
+            styles.buttonPrimary,
+            pressed && styles.buttonPressed,
+          ]}
+        >
+          <Text style={styles.buttonPrimaryText}>View leaderboard</Text>
+        </Pressable>
+
+        {!!s.topic && (
+          <Pressable
+            onPress={() => Alert.alert('Tip', `Focus on improving "${s.topic}" next time to maximize gains.`)}
+            style={({ pressed }) => [
+              styles.buttonSecondary,
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Text style={styles.buttonSecondaryText}>Personalized tip</Text>
+          </Pressable>
+        )}
+      </View>
+    </Card>
   );
 }
 
 function InsightsCard() {
   return (
-    <View style={{ marginHorizontal: 16, marginTop: 10 }}>
-      <View
-        style={{
-          borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12,
-          backgroundColor: '#f8fafc', padding: 14,
-        }}
-      >
-        <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }}>
-          AI Insights (coming soon)
-        </Text>
-        <Text style={{ marginTop: 6, color: '#475569' }}>
-          This area will summarize your performance and suggest targeted improvements based on recent sessions.
-        </Text>
-        <Text style={{ marginTop: 10, color: '#0ea5e9', fontWeight: '700' }}>
-          ↑ Tip: tap a dial above to learn more about that score
-        </Text>
-      </View>
-    </View>
+    <Card style={{ marginHorizontal: S.md, marginTop: S.md, padding: S.md, backgroundColor: '#0b1628' }}>
+      <Text style={styles.h2}>AI Insights (coming soon)</Text>
+      <Text style={[styles.body, { marginTop: 6 }]}>
+        This area will summarize your performance and suggest targeted improvements based on recent sessions.
+      </Text>
+      <Text style={{ marginTop: 10, color: C.accent, fontWeight: '700' }}>
+        ↑ Tip: tap a dial above to learn more about that score
+      </Text>
+    </Card>
   );
 }
 
-
-
-
-
 export default function SessionsScreen() {
   const { fetchWithAuth } = useAuth();
+  const isFocused = useIsFocused();
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [scrolled, setScrolled] = useState(false); 
+
   const insets = useSafeAreaInsets();
   const footerExtra = (insets.bottom || 10) + 6;
   const bottomPad = FOOTER_BAR_HEIGHT + footerExtra;
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      // pause/reactivate React Query focus when app bg/fg changes
+      focusManager.setFocused(state === 'active');
+    });
+    return () => sub.remove();
+  }, []);
+
+
   const fetchSessions = useCallback(async (): Promise<MobileSession[]> => {
     const res = await fetchWithAuth(`${API_BASE}/mobile/sessions?limit=50`);
     if (!res.ok) {
@@ -149,7 +215,38 @@ export default function SessionsScreen() {
   const { data, isFetching, refetch } = useQuery({
     queryKey: ['mobile-sessions', 'list'],
     queryFn: fetchSessions,
-    refetchInterval: 20000,
+
+    // v5: only boolean | "always"
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+
+    // keep results fresh for a while
+    staleTime: 30_000,
+    gcTime: 600_000,
+
+    // only run when this screen is focused
+    enabled: isFocused,
+
+    // v5: function arg is the query object; read from query.state.data
+    refetchInterval: (query) => {
+      const rows = (query.state.data as MobileSession[] | undefined) ?? [];
+      const active = rows.some(
+        (s) => s.status === 'queued' || s.status === 'processing'
+      );
+      return active ? 5000 : false;
+    },
+
+    // trim payload to what you render
+    select: (rows: MobileSession[]) =>
+      rows.map((r) => ({
+        id: r.id,
+        topic: r.topic,
+        status: r.status,
+        created_at: r.created_at,
+        leaderboard_tag: r.leaderboard_tag,
+        overall_score: r.overall_score,
+        scores_json: r.scores_json,
+      })),
   });
 
   const sourceSession = useMemo(() => {
@@ -186,13 +283,18 @@ export default function SessionsScreen() {
     );
   };
 
-  //const gestureSelected = selectedMetric === 'gesture_score';
   const showSummary = selectedMetric == null;
   const SelectedPanel =
-  (selectedMetric && PANEL_REGISTRY[selectedMetric as PanelKey]) || null;
+    (selectedMetric && PANEL_REGISTRY[selectedMetric as PanelKey]) || null;
 
   return (
-    <View style={{ flex: 1, backgroundColor: 'white' }}>
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      {/* Subtle gradient BG */}
+      <LinearGradient
+        colors={['#0b1220', '#0b1220']}
+        style={StyleSheet.absoluteFill}
+      />
+
       <HeaderBar
         title="Sessions"
         onPressNotifications={onPressNotifications}
@@ -202,12 +304,29 @@ export default function SessionsScreen() {
         dark
       />
 
-      {/* Dials stay fixed */}
-      <View style={{ paddingVertical: 8 }}>
+      {/* Sticky, glassy metric dials bar */}
+      <View
+        style={[
+          {
+            paddingVertical: 8,
+            backgroundColor: 'rgba(15,23,42,0.75)',
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderColor: C.border,
+          },
+          scrolled && {
+            shadowColor: '#000',
+            shadowOpacity: 0.25,
+            shadowRadius: 10,
+            shadowOffset: { width: 0, height: 8 },
+            elevation: 8,
+          },
+        ]}
+      >
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 12, columnGap: 12 }}
+          contentContainerStyle={{ paddingHorizontal: S.md, columnGap: S.md }}
         >
           {dialMetrics.map(m => (
             <MetricDial
@@ -215,7 +334,10 @@ export default function SessionsScreen() {
               label={m.label}
               value={m.value}
               active={selectedMetric === m.key}
-              onPress={() => setSelectedMetric(prev => (prev === m.key ? null : m.key))}
+              onPress={async () => {
+                await Haptics.selectionAsync();           // ✅ haptic tap
+                setSelectedMetric(prev => (prev === m.key ? null : m.key));
+              }}
             />
           ))}
         </ScrollView>
@@ -223,10 +345,24 @@ export default function SessionsScreen() {
 
       {/* Everything below dials can scroll */}
       <View style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: 24 }}
+          showsVerticalScrollIndicator={false}
+          onScroll={(e) => setScrolled(e.nativeEvent.contentOffset.y > 2)} // ✅ toggle shadow
+          scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl
+              tintColor={C.accent}
+              colors={[C.accent]}
+              refreshing={isFetching}
+              onRefresh={() => refetch()}
+            />
+          }
+        >
           {showSummary && !!sourceSession && (
             <>
               <SessionSummaryCard s={sourceSession} />
+              <LeaderboardAdjustmentsCard s={sourceSession} />
               <InsightsCard />
             </>
           )}
@@ -234,7 +370,9 @@ export default function SessionsScreen() {
           {!!SelectedPanel && !!sourceSession && (
             <SelectedPanel sessionId={sourceSession.id} />
           )}
-          <View style={{ height: bottomPad }} />
+
+          {/* Spacer so the footer nav never covers content */}
+          <View style={{ height: FOOTER_BAR_HEIGHT + (insets.bottom || 0) + 12 }} />
         </ScrollView>
       </View>
 
@@ -248,3 +386,24 @@ export default function SessionsScreen() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  h2: { fontSize: 16, fontWeight: '700', color: C.text },
+  body: { fontSize: 14, color: C.text },
+  subtle: { fontSize: 12, color: C.subtext },
+  semibold: { fontWeight: '700', color: C.text },
+
+  buttonPrimary: {
+    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8,
+    backgroundColor: C.accent,
+  },
+  buttonPrimaryText: { color: C.bg, fontWeight: '700' },
+
+  buttonSecondary: {
+    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+  },
+  buttonSecondaryText: { color: '#0f172a', fontWeight: '700' },
+
+  buttonPressed: { transform: [{ scale: 0.98 }], opacity: 0.9 },
+});

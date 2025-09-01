@@ -50,9 +50,11 @@ const GesturePanel: React.FC<PanelProps> = ({ sessionId }) => {
   return (
     <View style={{ marginHorizontal: 16, marginTop: 10 }}>
       <View style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, backgroundColor: '#fff', padding: 14, marginBottom: 10 }}>
-        <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }}>Gesture coaching</Text>
+        <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }}>Arm Gestures</Text>
         <Text style={{ marginTop: 6, color: '#475569' }}>
-          Review your hand usage, symmetry, and gesture timing. Aim for purposeful gestures that match your points.
+          This metric assesses your use of arm gestures. Movements (at a moderate angle and velocity) are 
+          scored positively, while crossing your hands or clasping them reduces your score. Gestures are 
+          scored within a tolerance (20-40% of presentation time). 
         </Text>
       </View>
 

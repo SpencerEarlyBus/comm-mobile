@@ -50,9 +50,10 @@ const MotionPanel: React.FC<PanelProps> = ({ sessionId }) => {
   return (
     <View style={{ marginHorizontal: 16, marginTop: 10 }}>
       <View style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, backgroundColor: '#fff', padding: 14, marginBottom: 10 }}>
-        <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }}>Body Motion Analysis</Text>
+        <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }}>Body Motion</Text>
         <Text style={{ marginTop: 6, color: '#475569' }}>
-          Review your hand usage, symmetry, and gesture timing. Aim for purposeful gestures that match your points.
+          This metric assesses your body movement through the presentation. Stiffness, jittery movement, or 
+          swaying back and forth will result in a lower score. 
         </Text>
       </View>
 

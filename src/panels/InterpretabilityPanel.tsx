@@ -22,8 +22,11 @@ const InterpretabilityPanel: React.FC<PanelProps> = ({ sessionId }) => {
           Interpretability
         </Text>
         <Text style={{ marginTop: 6, color: '#475569' }}>
-          Your pacing, pauses, and cadence shape how listeners follow your ideas.
-          Use these notes to spot rushing, monotone stretches, and effective pauses.
+          This metric assesses how interpretable your presentation would be to an audience. 
+          This is determined by the complexity of your sentences, syllables per word, and letter per 
+          100 words. Through this it determines the underlying grade level necessary to understand your 
+          presentation. Ideally, to be interpretable and accessible to a wide range of audiences, aim for 
+          an 8-10th grade level. 
         </Text>
       </View>
 

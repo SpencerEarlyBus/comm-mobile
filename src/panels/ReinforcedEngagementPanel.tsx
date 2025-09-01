@@ -16,8 +16,10 @@ const ReinforcedEngagementPanel: React.FC<PanelProps> = ({ sessionId }) => {
       {/* Description — collapsed by default */}
       <CollapsibleBox title="Reinforced Engagement" initiallyCollapsed>
         <Text style={{ color: '#475569' }}>
-          We analyze attention signals (pace, emphasis, pauses) and content alignment to estimate
-          moments where engagement is reinforced. Tap below to view the JSON breakdown.
+            This composite metric takes multiple components into account when determining a score. 
+            It will assess the key points you made in your presentation. It will then align those moments 
+            with engagement indicators (gestures, vocal pitch variation, effective pauses, etc.) to 
+            determine how engaging you were during those key moments.  
         </Text>
       </CollapsibleBox>
 

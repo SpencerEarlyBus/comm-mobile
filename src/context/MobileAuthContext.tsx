@@ -167,11 +167,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const token = accessRef.current;
       // DEBUG (remove after it works)
-      console.log('[fetchWithAuth] token?', !!token, token?.slice(0, 12));
+      //console.log('[fetchWithAuth] token?', !!token, token?.slice(0, 12));
       if (token) headers.set('Authorization', `Bearer ${token}`);
 
       // DEBUG (remove after it works)
-      console.log('[fetchWithAuth] →', url, 'Authorization:', headers.get('Authorization')?.slice(0, 20));
+      //console.log('[fetchWithAuth] →', url, 'Authorization:', headers.get('Authorization')?.slice(0, 20));
       return fetch(url, { ...options, headers });
     };
 
