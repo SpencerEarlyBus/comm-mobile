@@ -4,6 +4,7 @@ import { View, Pressable, Text, StyleSheet, useWindowDimensions } from 'react-na
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navGo } from '../navigation/navRef';
+import { useUIChrome } from '../context/UIChromeContext';
 
 type Props = { currentRoute?: string };
 export const FOOTER_BAR_HEIGHT = 64;
@@ -11,6 +12,8 @@ export const FOOTER_BAR_HEIGHT = 64;
 export default function FooterNav({ currentRoute }: Props) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const { hidden } = useUIChrome();
+  if (hidden) return null;
 
   // Responsive scaling around ~390pt baseline
   const base = 390;

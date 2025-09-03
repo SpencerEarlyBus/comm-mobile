@@ -1,4 +1,3 @@
-// src/context/MobileAuthContext.tsx
 import React, { createContext, useContext, useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -14,14 +13,17 @@ type Profile = {
   email: string;
   username?: string;
   role?: string;
-  created_at?: string;                 // ← add
+  created_at?: string;
   leaderboard_permissions?: string[];
   leaderboard_preference?: any;
   report_preference?: any;
   phrase_sentence?: string;
   unique_fillers?: string[];
-  unique_gesture_csv_path?: string;    // ← add
+  unique_gesture_csv_path?: string;
   email_verified?: boolean;
+
+  // NEW: list of tags the user follows
+  followed_leaderboard_tags?: string[];
 };
 
 type Ctx = {
@@ -32,6 +34,8 @@ type Ctx = {
   logout: () => Promise<void>;
   fetchWithAuth: (url: string, options?: RequestInit) => Promise<Response>;
   updateUser: (patch: Partial<Profile>) => Promise<void>;
+  getValidAccessToken: () => Promise<string | null>;
+  signupWithPassword?: (email: string, password: string, username?: string) => Promise<boolean>;
 };
 
 const AuthContext = createContext<Ctx | null>(null);
@@ -47,7 +51,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshRef = useRef<string | null>(null);
   const refreshFlight = useRef<Promise<boolean> | null>(null);
   const getAccessToken = useCallback(() => accessRef.current, []);
-
 
   // hydrate
   useEffect(() => {
@@ -66,10 +69,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     })();
   }, []);
-
-
-
-
 
   const persist = useCallback(async (access: string, refresh: string, profile?: Profile) => {
     accessRef.current = access;
@@ -92,7 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!res.ok) return false;
       const data = await res.json(); // { access, refresh, user }
       if (!data?.access || !data?.refresh || !data?.user?.email) return false;
-      await persist(data.access, data.refresh, data.user);
+      await persist(data.access, data.refresh, data.user as Profile);
       return true;
     } catch (e) {
       console.error('login-mobile failed', e);
@@ -111,26 +110,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
-
   const signupWithPassword = useCallback(async (email: string, password: string, username?: string) => {
     try {
-      const res = await fetch(`${API_BASE}/signup-mobile`, {        // <-- adjust if your route differs
+      const res = await fetch(`${API_BASE}/signup-mobile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, username }),
       });
       if (!res.ok) return false;
-      const data = await res.json(); // { access, refresh, user }
+      const data = await res.json();
       if (!data?.access || !data?.refresh || !data?.user?.email) return false;
-      await persist(data.access, data.refresh, data.user);
+      await persist(data.access, data.refresh, data.user as Profile);
       return true;
     } catch (e) {
       console.error('signup-mobile failed', e);
       return false;
     }
   }, [persist]);
-
-
 
   // single-flight refresh that honors your /refresh-mobile contract
   const refreshAccess = useCallback(async (): Promise<boolean> => {
@@ -142,13 +138,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const res = await fetch(`${API_BASE}/api/refresh-mobile`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh: rt }), // <-- matches your backend
+          body: JSON.stringify({ refresh: rt }),
         });
         if (!res.ok) return false;
         const data = await res.json(); // { access, refresh }
         if (!data?.access || !data?.refresh) return false;
-
-        // ROTATE tokens: store BOTH
         await persist(data.access, data.refresh);
         return true;
       } catch (e) {
@@ -161,31 +155,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return refreshFlight.current;
   }, [persist]);
 
-    const fetchWithAuth = useCallback(async (url: string, options: RequestInit = {}) => {
+  const fetchWithAuth = useCallback(async (url: string, options: RequestInit = {}) => {
     const doFetch = async () => {
       const headers = new Headers(options.headers as HeadersInit);
-
       const token = accessRef.current;
-      // DEBUG (remove after it works)
-      //console.log('[fetchWithAuth] token?', !!token, token?.slice(0, 12));
       if (token) headers.set('Authorization', `Bearer ${token}`);
-
-      // DEBUG (remove after it works)
-      //console.log('[fetchWithAuth] →', url, 'Authorization:', headers.get('Authorization')?.slice(0, 20));
       return fetch(url, { ...options, headers });
     };
 
     let res = await doFetch();
     if (res.status === 401) {
-        const ok = await refreshAccess();
-        if (!ok) {
+      const ok = await refreshAccess();
+      if (!ok) {
         await logout();
         return res;
-        }
-        res = await doFetch();
+      }
+      res = await doFetch();
     }
     return res;
-    }, [refreshAccess, logout]);
+  }, [refreshAccess, logout]);
 
   const getValidAccessToken = useCallback(async (): Promise<string | null> => {
     if (accessRef.current) return accessRef.current;
@@ -193,21 +181,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return ok ? accessRef.current : null;
   }, [refreshAccess]);
 
-    const updateUser = useCallback(async (patch: Partial<Profile>) => {
+  const updateUser = useCallback(async (patch: Partial<Profile>) => {
     setUser(prev => {
-        if (!prev) return prev; // keep null if not logged in
-
-        // Ensure required fields stay intact
-        const next: Profile = {
-        ...prev,
-        ...patch,
-        email: prev.email, // keep required string
-        };
-
-        AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(next)).catch(() => {});
-        return next;
+      if (!prev) return prev;
+      const next: Profile = { ...prev, ...patch, email: prev.email };
+      AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
     });
-    }, []);
+  }, []);
 
   const value = useMemo(() => ({
     user,
@@ -218,7 +199,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     logout,
     fetchWithAuth,
     updateUser,
-    getValidAccessToken,   
+    getValidAccessToken,
   }), [
     user, authReady, loginWithPassword, signupWithPassword, logout,
     fetchWithAuth, updateUser, getValidAccessToken

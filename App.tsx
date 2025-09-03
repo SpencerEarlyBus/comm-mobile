@@ -9,6 +9,7 @@ import { MenuProvider } from './src/context/MenuContext';
 import MenuPortal from './src/components/MenuPortal';
 import FooterNav from './src/components/FooterNav';
 import { navigationRef } from './src/navigation/navRef';   // ← add
+import { UIChromeProvider } from './src/context/UIChromeContext';
 
 import HomeScreen from './src/screens/HomeScreen';
 import AuthedSessionsScreen from './src/screens/AuthedSessionsScreen';
@@ -25,6 +26,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+      <UIChromeProvider>
       <AuthProvider>
         <MenuProvider>
           <QueryClientProvider client={qc}>
@@ -49,6 +51,7 @@ export default function App() {
           </QueryClientProvider>
         </MenuProvider>
       </AuthProvider>
+      </UIChromeProvider>
     </SafeAreaProvider>
   );
 }

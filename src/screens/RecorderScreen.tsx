@@ -1,47 +1,69 @@
-// src/screens/RecorderScreen.tsx
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import {
-  View, Button, Alert, Text, Linking, AppState, ActivityIndicator, Platform,
-  TextInput, Switch, ScrollView, StyleSheet, Pressable
-} from 'react-native';
+import { View, Button, Alert, Linking, AppState, Platform, ScrollView, StyleSheet } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { CameraView, Camera, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system';
 import { CAMERA } from '../native/camera';
 import { useAuth } from '../context/MobileAuthContext';
+import HeaderBar from '../components/HeaderBar';
+import { useUIChrome } from '../context/UIChromeContext';
+
+import RecorderSetupPanel from '../components/RecorderSetupPanel';
+import RecordingOverlay from '../components/RecordingOverlay';
+import TopicCountdownPanel from '../components/TopicCountdownPanel';
+import { COLORS } from '../theme/colors';
 
 type Status = 'granted' | 'denied' | 'undetermined' | 'restricted' | 'unknown';
 
-const DEFAULT_TOPICS = [
-  'Explain human evolution',
-  'Discuss the fall of the Roman Empire',
-  'What are the implications of lowering interest rates?',
-  'What are quadratics?',
-];
+type FollowedBoard = {
+  id: string;
+  tag: string;
+  name: string;
+  description?: string | null;
+  diffLevel?: string | null;
+  example_topic?: string | null;
+};
 
 export default function RecorderScreen() {
   const camRef = useRef<CameraView | null>(null);
+  const { setHidden } = useUIChrome();
 
-  // phases: setup (no camera), capture (camera mounted)
-  const [mode, setMode] = useState<'setup' | 'capture'>('setup');
-
+  
+  const [mode, setMode] = useState<'setup' | 'preview' | 'capture'>('setup');
   const [recording, setRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
+  const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortedRef = useRef(false);
 
-  const { user, authReady, isAuthenticated, getValidAccessToken } = useAuth() as any;
+  const { user, authReady, isAuthenticated, getValidAccessToken, fetchWithAuth } = useAuth() as any;
 
   const [camPerm, requestCam] = useCameraPermissions();
   const [micPerm, requestMic] = useMicrophonePermissions();
-
   const [perm, setPerm] = useState<{ cam: Status; mic: Status }>({ cam: 'unknown', mic: 'unknown' });
 
-  // setup form state
-  const [topic, setTopic] = useState(DEFAULT_TOPICS[0]);
+  // Topic now comes only from the leaderboard JSON when Ready is pressed
+  const [topic, setTopic] = useState<string>('');
+  const [assignedTopic, setAssignedTopic] = useState<string>('');
+  const assignedTopicRef = React.useRef<string>('');
+  useEffect(() => { assignedTopicRef.current = assignedTopic; }, [assignedTopic]);
+
   const [organization, setOrganization] = useState('');
   const [leaderboardOptIn, setLeaderboardOptIn] = useState(true);
 
-  const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://your.backend.root'; // ← ensure correct base
+  // Followed leaderboards + selected per-session leaderboard
+  const [followedBoards, setFollowedBoards] = useState<FollowedBoard[]>([]);
+  const [selectedLeaderboardTag, setSelectedLeaderboardTag] = useState<string | null>(null);
+  const [prepping, setPrepping] = useState(false); // blocks Ready while fetching topic
+
+  const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://your.backend.root';
+
+  // Hide chrome while in preview (countdown screen) or capture.
+  useEffect(() => {
+    const hide = (mode === 'preview' || mode === 'capture') && (recording || uploading || countdown !== null || mode === 'preview');
+    setHidden(hide);
+    return () => setHidden(false);
+  }, [mode, recording, uploading, countdown, setHidden]);
 
   const refreshPerms = useCallback(async () => {
     const cam = await Camera.getCameraPermissionsAsync();
@@ -60,6 +82,42 @@ export default function RecorderScreen() {
     });
     return () => sub.remove();
   }, [refreshPerms]);
+
+  useEffect(() => {
+    // cleanup if screen unmounts mid-capture/preview
+    return () => {
+      if (countdownTimer.current) clearInterval(countdownTimer.current);
+      setHidden(false);
+      abortedRef.current = true;
+      try { camRef.current?.stopRecording?.(); } catch {}
+    };
+  }, [setHidden]);
+
+  // Load followed leaderboards (JWT)
+  const loadFollowed = useCallback(async () => {
+    if (!isAuthenticated) {
+      setFollowedBoards([]);
+      setSelectedLeaderboardTag(null);
+      return;
+    }
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/mobile/leaderboards/follows`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const items = (data?.items || []) as FollowedBoard[];
+      setFollowedBoards(items);
+      // pick first by default if opted-in and none selected
+      if (leaderboardOptIn && !selectedLeaderboardTag && items.length) {
+        setSelectedLeaderboardTag(items[0].tag);
+      }
+    } catch {
+      // ignore
+    }
+  }, [API_BASE, fetchWithAuth, isAuthenticated, leaderboardOptIn, selectedLeaderboardTag]);
+
+  useEffect(() => {
+    loadFollowed();
+  }, [loadFollowed]);
 
   const requestBoth = async () => {
     const c = perm.cam === 'granted' ? camPerm : await requestCam();
@@ -81,205 +139,260 @@ export default function RecorderScreen() {
     return true;
   };
 
-  const buildMetadataText = () => {
-    const now = new Date().toISOString();
-    const lines = [
-      `email: ${user?.email ?? ''}`,
-      `datetime_iso: ${now}`,
-      `topic: ${topic}`,
-      `organization: ${organization}`,
-      `leaderboard_opt_in: ${leaderboardOptIn ? 'true' : 'false'}`,
-      `platform: ${Platform.OS} ${Platform.Version}`,
-      `app: comm-mobile`,
-    ];
-    return lines.join('\n');
-  };
 
-  const doUpload = async (uri: string) => {
-    setUploading(true);
-    try {
-      const filename = uri.split('/').pop() || `mobile_frontFacing_${Date.now()}.mp4`;
-      const token = await getValidAccessToken(); // ← always valid or null
-      if (!token) throw new Error('Not authenticated');
-
-      // pass metadata via "parameters" (Form fields) — backend reads request.form.get('metadata')
-      const res = await FileSystem.uploadAsync(
-        `${API_BASE}/media/mobile_upload_video`,
-        uri,
-        {
-          httpMethod: 'POST',
-          uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-          fieldName: 'video',
-          parameters: {
-            filename,
-            metadata: buildMetadataText(),
-          },
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      setUploading(false);
-
-      if (res.status < 200 || res.status >= 300) {
-        console.error('Upload failed', res.status, res.body);
-        Alert.alert('Upload failed', res.body || `HTTP ${res.status}`);
-        return;
-      }
-
-      const data = safeJson(res.body);
-      Alert.alert('Uploaded!', `Session: ${data?.session_id ?? '—'}\nKey: ${data?.s3_key ?? '—'}`);
-      // reset back to setup for next run
-      setMode('setup');
-    } catch (e: any) {
-      setUploading(false);
-      console.error('Upload exception', e);
-      Alert.alert('Upload exception', e?.message || String(e));
-    }
-  };
 
   const safeJson = (s?: string) => {
     try { return s ? JSON.parse(s) : null; } catch { return null; }
   };
 
-  const startCaptureFlow = useCallback(async () => {
-    if (!(await requestBoth())) return;
 
-    // 10s countdown
-    setCountdown(10);
-    const interval = setInterval(() => {
-      setCountdown(prev => (prev && prev > 1 ? prev - 1 : null));
-    }, 1000);
-
-    await new Promise<void>((resolve) => {
-      setTimeout(() => {
-        clearInterval(interval);
-        resolve();
-      }, 10_000);
-    });
-
-    if (AppState.currentState !== 'active') {
-      setCountdown(null);
-      Alert.alert('Cancelled', 'App was not active.');
-      return;
-    }
-
-    // Record 60s (no stop button)
+  const doUpload = React.useCallback(async (uri: string) => {
+    setUploading(true);
     try {
-      setRecording(true);
-      const vid = await camRef.current?.recordAsync({ maxDuration: 60 });
-      setRecording(false);
+      const nowTopic = String(assignedTopicRef.current || '');  // <- always fresh
+      const nowTag = leaderboardOptIn ? (selectedLeaderboardTag ?? '') : '';
+      const filename = uri.split('/').pop() || `mobile_frontFacing_${Date.now()}.mp4`;
+      const token = await getValidAccessToken();
+      if (!token) throw new Error('Not authenticated');
 
-      if (!vid?.uri) {
-        Alert.alert('No video captured');
+      // build the text right here to avoid stale closures
+      const metadataText =
+        [
+          `email: ${user?.email ?? ''}`,
+          `datetime_iso: ${new Date().toISOString()}`,
+          `topic: ${nowTopic}`,
+          `organization: ${organization}`,
+          `leaderboard_opt_in: ${leaderboardOptIn ? 'true' : 'false'}`,
+          `leaderboard_tag: ${nowTag}`,
+          `platform: ${Platform.OS} ${Platform.Version}`,
+          `app: comm-mobile`,
+        ].join('\n');
+
+
+      const res = await FileSystem.uploadAsync(`${API_BASE}/media/mobile_upload_video`, uri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'video',
+        parameters: {
+          filename,
+          metadata: metadataText,            // human-readable file
+          topic: nowTopic,                   // machine field
+          topic_title: nowTopic,             // alt key (some backends use this)
+          leaderboard_tag: nowTag,
+        },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      setUploading(false);
+      if (res.status < 200 || res.status >= 300) {
+        Alert.alert('Upload failed', res.body || `HTTP ${res.status}`);
+        setMode('setup');
         return;
       }
 
-      // optional: debug file info
-      const info = await FileSystem.getInfoAsync(vid.uri);
-      console.log('Captured file:', info);
+      const data = (() => { try { return JSON.parse(res.body); } catch { return null; } })();
+      Alert.alert('Uploaded!', `Session: ${data?.session_id ?? '—'}\nKey: ${data?.s3_key ?? '—'}`);
+      setMode('setup');
+    } catch (e: any) {
+      setUploading(false);
+      Alert.alert('Upload exception', e?.message || String(e));
+      setMode('setup');
+    }
+  }, [
+    API_BASE,
+    getValidAccessToken,
+    user?.email,
+    organization,
+    leaderboardOptIn,
+    selectedLeaderboardTag,
+  ]);
 
-      await doUpload(vid.uri);
+
+
+
+
+
+
+  const abortAll = useCallback(async () => {
+    // Abort preview countdown if active
+    if (mode === 'preview' && countdown !== null) {
+      if (countdownTimer.current) { clearInterval(countdownTimer.current); countdownTimer.current = null; }
+      setCountdown(null);
+      setMode('setup');
+      return;
+    }
+    // Abort active capture recording
+    if (mode === 'capture' && recording) {
+      abortedRef.current = true;
+      try { await camRef.current?.stopRecording(); } catch {}
+    } else if (mode === 'capture') {
+      setMode('setup');
+    }
+  }, [mode, countdown, recording]);
+
+  // Get first topic *title* from the leaderboard's topics JSON via presigned URL
+  const fetchFirstTopicFromLeaderboard = useCallback(async (tag: string): Promise<string | null> => {
+    try {
+      const presign = await fetchWithAuth(`${API_BASE}/mobile/leaderboards/${encodeURIComponent(tag)}/topics-url`);
+      if (!presign.ok) return null;
+      const j = await presign.json();
+      if (!j?.url) return null;
+
+      const blobRes = await fetch(j.url);
+      if (!blobRes.ok) return null;
+      const topicsJson = await blobRes.json();
+      const first = topicsJson?.topics?.[0];
+      if (!first || !first.title) return null; // title only, per spec
+      return first.title as string;
+    } catch {
+      return null;
+    }
+  }, [API_BASE, fetchWithAuth]);
+
+  // Start the actual camera recording (no countdown here; preview handled it)
+  const startCaptureFlow = React.useCallback(async () => {
+    abortedRef.current = false;
+
+    setRecording(true);
+    try {
+      const vid = await camRef.current?.recordAsync({ maxDuration: 60 });
+      setRecording(false);
+
+      if (abortedRef.current) {
+        if (vid?.uri) { try { await FileSystem.deleteAsync(vid.uri, { idempotent: true }); } catch {} }
+        setMode('setup');
+        return;
+      }
+
+      if (!vid?.uri) { Alert.alert('No video captured'); setMode('setup'); return; }
+
+      await doUpload(vid.uri); // <- now the up-to-date doUpload
     } catch (e: any) {
       setRecording(false);
-      console.error('recordAsync error', e);
       Alert.alert('Recording error', e?.message || String(e));
+      setMode('setup');
     }
-  }, [requestBoth]);
+  }, [doUpload]);
+
 
   // derived UI state
   const granted = perm.cam === 'granted' && perm.mic === 'granted';
   const undetermined = perm.cam === 'undetermined' || perm.mic === 'undetermined';
   const locked = countdown !== null || recording || uploading;
 
-  // ---------- RENDER ----------
+  // Setup mode
   if (mode === 'setup') {
     return (
-      <ScrollView contentContainerStyle={styles.setupRoot}>
-        <Text style={styles.h1}>New recording</Text>
-        <Text style={styles.sub}>Choose a topic, then press Ready.</Text>
-
-        <Text style={styles.label}>Topic</Text>
-        <View style={styles.topicList}>
-          {DEFAULT_TOPICS.map((t) => {
-            const active = topic === t;
-            return (
-              <Pressable
-                key={t}
-                onPress={() => setTopic(t)}
-                style={[styles.topicPill, active && styles.topicPillActive]}
-              >
-                <Text style={[styles.topicText, active && styles.topicTextActive]}>{t}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <Text style={[styles.label, { marginTop: 18 }]}>Organization (optional)</Text>
-        <TextInput
-          placeholder="e.g., Comm Labs"
-          placeholderTextColor="#94a3b8"
-          value={organization}
-          onChangeText={setOrganization}
-          style={styles.input}
+      <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
+        <HeaderBar
+          title="Record"
+          onPressNotifications={() => Alert.alert('Notifications', 'Coming soon')}
+          onPressStatus={() => Alert.alert('Recorder', 'Recorder status')}
+          dark
         />
+        <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+          <RecorderSetupPanel
+            organization={organization}
+            setOrganization={setOrganization}
+            leaderboardOptIn={leaderboardOptIn}
+            setLeaderboardOptIn={(v) => {
+              setLeaderboardOptIn(v);
+              if (!v) setSelectedLeaderboardTag(null);
+              else if (v && !selectedLeaderboardTag && followedBoards.length) {
+                setSelectedLeaderboardTag(followedBoards[0].tag);
+              }
+            }}
+            granted={granted}
+            undetermined={undetermined}
+            onRequestPerms={() => {
+              if (undetermined) requestBoth(); else Linking.openSettings();
+            }}
 
-        <View style={styles.row}>
-          <Text style={styles.labelInline}>Include on leaderboard</Text>
-          <Switch value={leaderboardOptIn} onValueChange={setLeaderboardOptIn} />
-        </View>
+            followedBoards={followedBoards}
+            selectedLeaderboardTag={selectedLeaderboardTag}
+            setSelectedLeaderboardTag={setSelectedLeaderboardTag}
 
-        {!granted && (
-          <View style={{ marginTop: 12 }}>
-            <Text style={styles.note}>
-              Camera & microphone permissions are required.
-            </Text>
-            <Button
-              title={undetermined ? 'Allow Camera & Microphone' : 'Open Settings'}
-              onPress={undetermined ? requestBoth : () => Linking.openSettings()}
-            />
-          </View>
-        )}
+            onReady={async () => {
+              if (!authReady || !isAuthenticated) {
+                Alert.alert('Please sign in', 'You must be logged in to record.');
+                return;
+              }
+              if (prepping) return;
 
-        <View style={{ height: 12 }} />
-        <Button
-          title={!authReady || !isAuthenticated ? 'Log in to continue' : 'Ready'}
-          onPress={() => {
-            if (!isAuthenticated) {
-              Alert.alert('Please sign in', 'You must be logged in to record.');
-              return;
-            }
-            setMode('capture');
-            // allow CameraView to mount before starting
-            setTimeout(() => startCaptureFlow(), 250);
-          }}
-          disabled={!authReady || !isAuthenticated}
-        />
-      </ScrollView>
+              // If opted-in, require a selection and fetch the topic title
+              if (leaderboardOptIn) {
+                if (!selectedLeaderboardTag) {
+                  Alert.alert('Select a leaderboard', 'Pick a leaderboard to get your topic.');
+                  return;
+                }
+                try {
+                  setPrepping(true);
+                  const t = await fetchFirstTopicFromLeaderboard(selectedLeaderboardTag);
+                  if (!t) {
+                    Alert.alert('No topics available', 'This leaderboard has no topics configured yet.');
+                    return;
+                  }
+                  setAssignedTopic(t);
+                  setTopic(t); // <- title only
+                } finally {
+                  setPrepping(false);
+                }
+              } else {
+                setTopic('');
+                setAssignedTopic('');
+              }
+
+              // Ensure permissions BEFORE countdown
+              const ok = await requestBoth();
+              if (!ok) return;
+
+              // Go to preview panel + start countdown
+              setMode('preview');
+              setCountdown(10);
+              if (countdownTimer.current) clearInterval(countdownTimer.current);
+              countdownTimer.current = setInterval(() => {
+                setCountdown((prev) => (prev && prev > 1 ? prev - 1 : null));
+              }, 1000);
+
+              // After 10s, switch to capture and record
+              setTimeout(() => {
+                if (countdownTimer.current) { clearInterval(countdownTimer.current); countdownTimer.current = null; }
+                setCountdown(null);
+                setMode('capture');
+                // small delay to let CameraView mount before record
+                setTimeout(() => startCaptureFlow(), 150);
+              }, 10_000);
+            }}
+            readyDisabled={!authReady || !isAuthenticated || prepping}
+          />
+        </ScrollView>
+      </View>
     );
   }
 
-  // capture mode (camera mounted)
+  // Preview mode (topic + countdown; no camera yet)
+  if (mode === 'preview') {
+    return (
+      <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
+        <TopicCountdownPanel topic={assignedTopic || 'Free topic'} countdown={countdown} onAbort={abortAll} />
+      </View>
+    );
+  }
+
+
+  // Capture mode (header/footer hidden via UIChromeContext)
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: COLORS.black }}>
       <CameraView ref={camRef} style={{ flex: 1 }} facing={CAMERA.FRONT} mode="video" />
-
-      {(countdown !== null || recording || uploading) && (
-        <View style={styles.overlay}>
-          {countdown !== null && <Text style={styles.countText}>{countdown}</Text>}
-          {recording && <Text style={styles.statusText}>Recording… (1 min)</Text>}
-          {uploading && (
-            <>
-              <ActivityIndicator size="large" />
-              <Text style={styles.statusText}>Uploading…</Text>
-            </>
-          )}
-        </View>
-      )}
-
-      {/* In case you want a way out if not locked */}
+      <RecordingOverlay
+        countdown={null}         // countdown happens in preview screen now
+        recording={recording}
+        uploading={uploading}
+        onAbort={abortAll}
+      />
       {!locked && (
         <View style={styles.bottomBar}>
-          <Button title="Back to Setup" onPress={() => setMode('setup')} />
+          <Button title="Back to Setup" onPress={() => setMode('setup')} color={COLORS.accent} />
         </View>
       )}
     </View>
@@ -287,34 +400,5 @@ export default function RecorderScreen() {
 }
 
 const styles = StyleSheet.create({
-  setupRoot: { padding: 16, paddingBottom: 120, gap: 10 },
-  h1: { fontSize: 22, fontWeight: '800' },
-  sub: { color: '#475569', marginBottom: 10 },
-  label: { fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 },
-  labelInline: { fontSize: 14, color: '#0f172a', fontWeight: '700' },
-
-  topicList: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-  topicPill: {
-    borderWidth: 1, borderColor: '#cbd5e1',
-    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 18, backgroundColor: '#fff',
-  },
-  topicPillActive: { backgroundColor: '#0ea5e9', borderColor: '#0ea5e9' },
-  topicText: { color: '#0f172a', fontWeight: '700' },
-  topicTextActive: { color: '#fff' },
-
-  input: {
-    borderWidth: 1, borderColor: '#cbd5e1', padding: 10,
-    borderRadius: 10, color: '#0f172a', backgroundColor: '#fff',
-  },
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 },
-
-  note: { color: '#64748b', fontSize: 13, marginBottom: 8 },
-
-  overlay: {
-    position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  countText: { fontSize: 64, color: 'white', fontWeight: '700' },
-  statusText: { marginTop: 6, fontSize: 18, color: 'white' },
   bottomBar: { position: 'absolute', bottom: 30, alignSelf: 'center' },
 });

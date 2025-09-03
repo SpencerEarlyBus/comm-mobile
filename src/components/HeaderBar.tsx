@@ -38,15 +38,17 @@ export default function HeaderBar({
         <Text numberOfLines={1} style={[styles.title, { color: titleColor }]}>{title}</Text>
 
         <View style={styles.right}>
-          {/* Review / picker */}
-          <Pressable
-            accessibilityLabel="Review sessions"
-            onPress={onPressReview}
-            hitSlop={10}
-            style={({ pressed }) => [{ padding: 6, opacity: pressed ? 0.6 : 1 }]}
-          >
-            <Ionicons name="albums-outline" size={ICON_SIZE} color={iconColor} />
-          </Pressable>
+          {/* Review / picker — only render if a handler is provided */}
+          {onPressReview && (
+            <Pressable
+              accessibilityLabel="Review sessions"
+              onPress={onPressReview}
+              hitSlop={10}
+              style={({ pressed }) => [{ padding: 6, opacity: pressed ? 0.6 : 1 }]}
+            >
+              <Ionicons name="albums-outline" size={ICON_SIZE} color={iconColor} />
+            </Pressable>
+          )}
 
           {/* Notifications */}
           <Pressable
