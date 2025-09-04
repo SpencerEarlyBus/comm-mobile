@@ -1,90 +1,179 @@
-import React, { useCallback } from 'react';
-import { View, Text, ActivityIndicator, Pressable, ScrollView } from 'react-native';
+// src/panels/InterpretabilityPanel.tsx
+import React, { useCallback, useMemo } from 'react';
+import { View, Text, ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 import type { PanelProps } from './Panel.types';
-import { useSessionTextA } from '../hooks/useSessionTextA';
+import CollapsibleBox from '../components/CollapsibleBox';
+import { COLORS as C } from '../theme/colors';
 import { errorMsg } from '../utils/errorMsg';
+import { useSessionInterpretabilityTxt } from '../hooks/useSessionInterpretabilityTxt';
+import { parseInterpretabilityTxt, normalizeGradeToScore } from '../utils/parseInterpretabilityTxt';
+
+const P = { pad: 12, radius: 12 };
+
+function GradeMeter({
+  label,
+  grade,
+  help,
+}: {
+  label: string;
+  grade?: number | null;
+  help?: string;
+}) {
+  const pct = Math.max(0, Math.min(100, normalizeGradeToScore(grade)));
+  return (
+    <View style={{ gap: 4 }}>
+      <View style={styles.meterHeader}>
+        <Text style={styles.meterLabel}>{label}</Text>
+        <Text style={styles.meterRight}>
+          {Number.isFinite(grade ?? NaN) ? `${(grade as number).toFixed(2)}` : '—'} grade
+        </Text>
+      </View>
+      <View style={styles.meterTrack}>
+        <View style={[styles.meterFill, { width: `${pct}%` }]} />
+      </View>
+      {!!help && <Text style={styles.meterHelp}>{help}</Text>}
+    </View>
+  );
+}
 
 const InterpretabilityPanel: React.FC<PanelProps> = ({ sessionId }) => {
-  const { text, isLoading, isError, error, refetch } = useSessionTextA(sessionId, true);
-
+  const { text, isLoading, isError, error, refetch } = useSessionInterpretabilityTxt(sessionId, true);
   const onRetry = useCallback(() => { refetch(); }, [refetch]);
+
+  const parsed = useMemo(() => (text ? parseInterpretabilityTxt(text) : undefined), [text]);
 
   return (
     <View style={{ marginHorizontal: 16, marginTop: 10 }}>
-      {/* Description */}
-      <View
-        style={{
-          borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12,
-          backgroundColor: '#fff', padding: 14, marginBottom: 10,
-        }}
-      >
-        <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }}>
-          Interpretability
+      {/* Info (collapsed) */}
+      <CollapsibleBox title="Interpretability" initiallyCollapsed>
+        <Text style={{ color: C.label }}>
+          We estimate the reading grade level needed to understand your transcript using standard
+          readability indices. Aim for an <Text style={{ fontWeight: '800', color: C.text }}>8–9</Text> grade level
+          for broad accessibility.
         </Text>
-        <Text style={{ marginTop: 6, color: '#475569' }}>
-          This metric assesses how interpretable your presentation would be to an audience. 
-          This is determined by the complexity of your sentences, syllables per word, and letter per 
-          100 words. Through this it determines the underlying grade level necessary to understand your 
-          presentation. Ideally, to be interpretable and accessible to a wide range of audiences, aim for 
-          an 8-10th grade level. 
-        </Text>
-      </View>
+      </CollapsibleBox>
 
-      {/* Text output */}
-      <View
-        style={{
-          borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12,
-          backgroundColor: '#0b1220',
-          overflow: 'hidden',
-        }}
+      {/* Results */}
+      <CollapsibleBox
+        title="Results"
+        initiallyCollapsed={false}
+        backgroundColor={C.card}
+        headerTint={C.text}
+        borderColor={C.border}
       >
         {isLoading ? (
-          <View style={{ padding: 18, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={styles.centerBox}>
             <ActivityIndicator />
-            <Text style={{ marginTop: 8, color: '#cbd5e1' }}>Loading rhythm notes…</Text>
+            <Text style={styles.loadingText}>Loading interpretability…</Text>
           </View>
         ) : isError ? (
-          <View style={{ padding: 14 }}>
-            <Text style={{ color: '#ef4444', marginBottom: 8 }}>
-              Couldn’t load notes: {errorMsg(error)}
-            </Text>
-            <Pressable
-              onPress={onRetry}
-              style={{
-                alignSelf: 'flex-start',
-                paddingVertical: 6, paddingHorizontal: 12,
-                borderRadius: 8, backgroundColor: '#0ea5e9',
-              }}
-            >
-              <Text style={{ color: 'white', fontWeight: '700' }}>Retry</Text>
+          <View>
+            <Text style={styles.errText}>Couldn’t load: {errorMsg(error)}</Text>
+            <Pressable onPress={onRetry} style={styles.retryBtn}>
+              <Text style={styles.retryText}>Retry</Text>
             </Pressable>
           </View>
-        ) : text ? (
-          <ScrollView
-            nestedScrollEnabled
-            contentContainerStyle={{ padding: 14 }}
-            showsVerticalScrollIndicator={false}
-          >
-            <Text
-              style={{
-                color: '#e2e8f0',
-                fontFamily: 'monospace',
-                fontSize: 12,
-                lineHeight: 18,
-              }}
-              selectable
-            >
-              {text}
-            </Text>
-          </ScrollView>
+        ) : !parsed ? (
+          <Text style={styles.emptyText}>No interpretability data available.</Text>
         ) : (
-          <View style={{ padding: 14 }}>
-            <Text style={{ color: '#64748b' }}>No vocal-rhythm notes available.</Text>
+          <View style={{ gap: 12 }}>
+
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Readability metrics</Text>
+
+              <GradeMeter
+                label="Flesch–Kincaid"
+                grade={parsed.fk}
+                help="Estimated school grade level."
+              />
+              <GradeMeter
+                label="SMOG Index"
+                grade={parsed.smog}
+                help="Uses polysyllable density (syllables per word)."
+              />
+              <GradeMeter
+                label="Automated Readability (ARI)"
+                grade={parsed.ari}
+                help="Uses characters per word."
+              />
+              <GradeMeter
+                label="Coleman–Liau Index"
+                grade={parsed.cli}
+                help="Uses letters per 100 words & sentence density."
+              />
+
+              <Text style={styles.tip}>
+                Ideal window is <Text style={{ fontWeight: '800', color: C.text }}>8–9</Text>. Bars reflect how close
+                each metric’s grade is to that window (100% = in-range).
+              </Text>
+            </View>
           </View>
         )}
-      </View>
+      </CollapsibleBox>
     </View>
   );
 };
 
 export default InterpretabilityPanel;
+
+const styles = StyleSheet.create({
+  centerBox: { paddingVertical: 8, alignItems: 'center', justifyContent: 'center' },
+  loadingText: { marginTop: 8, color: C.label },
+  errText: { color: C.danger, marginBottom: 8 },
+  retryBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: 6, paddingHorizontal: 12,
+    borderRadius: 8, backgroundColor: C.accent,
+  },
+  retryText: { color: C.white, fontWeight: '700' },
+  emptyText: { color: C.label },
+
+  inlineStat: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginBottom: 4,
+  },
+  kvLabel: { color: C.label, fontSize: 12 },
+  kvValue: { color: C.white, fontSize: 16, fontWeight: '800' },
+
+  card: {
+    backgroundColor: C.card,
+    borderColor: C.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: P.radius,
+    padding: P.pad,
+    gap: 10,
+  },
+  cardTitle: { color: C.text, fontSize: 14, fontWeight: '800' },
+  tip: { color: C.label, fontSize: 12, marginTop: 8 },
+
+  meterHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+  },
+  meterLabel: { color: C.label, fontSize: 12, fontWeight: '600' },
+  meterRight: { color: C.text, fontSize: 12, fontWeight: '700' },
+  meterTrack: {
+    height: 8,
+    backgroundColor: C.track,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  meterFill: {
+    height: 8,
+    backgroundColor: C.accent,
+    borderRadius: 999,
+  },
+
+  meterHelp: {
+    color: C.label,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+
+  rawText: { color: C.text, fontFamily: 'monospace', fontSize: 12, lineHeight: 18 },
+});

@@ -1,4 +1,5 @@
-import React, { useCallback, useState } from 'react';
+// src/components/CollapsibleBox.tsx
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +7,7 @@ import {
   LayoutAnimation,
   Platform,
   UIManager,
+  StyleProp,
   ViewStyle,
   TextStyle,
 } from 'react-native';
@@ -19,14 +21,15 @@ type Props = {
   title: string;
   initiallyCollapsed?: boolean;         // default true
   children: React.ReactNode;
-  containerStyle?: ViewStyle;
-  headerStyle?: ViewStyle;
-  titleStyle?: TextStyle;
+  containerStyle?: StyleProp<ViewStyle>;
+  headerStyle?: StyleProp<ViewStyle>;
+  titleStyle?: StyleProp<TextStyle>;
   headerTint?: string;                  // default '#0f172a'
   borderColor?: string;                 // default '#e5e7eb'
   backgroundColor?: string;             // default '#fff'
   rightAdornment?: React.ReactNode;     // optional (e.g., buttons)
-  onToggle?: (collapsed: boolean) => void;
+  /** Called AFTER the component commits. Receives `open` (true when expanded). */
+  onToggle?: (open: boolean) => void;
 };
 
 const CollapsibleBox: React.FC<Props> = ({
@@ -46,12 +49,18 @@ const CollapsibleBox: React.FC<Props> = ({
 
   const toggle = useCallback(() => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setCollapsed((c) => {
-      const next = !c;
-      onToggle?.(next);
-      return next;
-    });
-  }, [onToggle]);
+    setCollapsed((c) => !c);
+  }, []);
+
+  // Fire onToggle only *after* commit to avoid “setState during render”
+  const isFirst = useRef(true);
+  useEffect(() => {
+    if (isFirst.current) {
+      isFirst.current = false;
+      return; // don’t emit on first mount
+    }
+    onToggle?.(!collapsed); // pass `open`
+  }, [collapsed, onToggle]);
 
   return (
     <View
