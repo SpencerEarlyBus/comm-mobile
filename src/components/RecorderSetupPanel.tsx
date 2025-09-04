@@ -17,10 +17,13 @@ type Props = {
   onRequestPerms: () => void;
   onReady: () => void;
   readyDisabled: boolean;
-
+  
   followedBoards: FollowedBoard[];
   selectedLeaderboardTag: string | null;
   setSelectedLeaderboardTag: (tag: string | null) => void;
+
+  onOpenCameraSetup: () => void; 
+
 };
 
 export default function RecorderSetupPanel({
@@ -29,6 +32,7 @@ export default function RecorderSetupPanel({
   granted, undetermined,
   onRequestPerms, onReady, readyDisabled,
   followedBoards, selectedLeaderboardTag, setSelectedLeaderboardTag,
+  onOpenCameraSetup,
 }: Props) {
   const hasFollows = followedBoards?.length > 0;
 
@@ -105,6 +109,18 @@ export default function RecorderSetupPanel({
       )}
 
       <View style={{ height: 12 }} />
+
+
+      <Pressable
+        onPress={onOpenCameraSetup}
+        style={({ pressed }) => [
+          styles.calBtn,
+          pressed && { transform: [{ scale: 0.98 }], opacity: 0.96 },
+        ]}
+      >
+        <Text style={styles.calBtnText}>Camera setup</Text>
+      </Pressable>
+
       <Pressable
         onPress={onReady}
         disabled={readyDisabled}
@@ -162,4 +178,17 @@ const styles = StyleSheet.create({
     paddingVertical: 14, alignItems: 'center',
   },
   readyText: { color: COLORS.white, fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
+
+  calBtn: {
+  marginTop: 8,
+  backgroundColor: COLORS.card,
+  borderColor: COLORS.border,
+  borderWidth: 1,
+  borderRadius: 999,
+  paddingVertical: 12,
+  alignItems: 'center',
+  },
+  calBtnText: { color: COLORS.text, fontWeight: '800' },
+
+
 });

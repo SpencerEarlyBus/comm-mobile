@@ -9,6 +9,7 @@ import HeaderBar from '../components/HeaderBar';
 import { useUIChrome } from '../context/UIChromeContext';
 
 import RecorderSetupPanel from '../components/RecorderSetupPanel';
+import CameraSetupPanel from '../components/CameraSetupUser';
 import RecordingOverlay from '../components/RecordingOverlay';
 import TopicCountdownPanel from '../components/TopicCountdownPanel';
 import { COLORS } from '../theme/colors';
@@ -29,7 +30,7 @@ export default function RecorderScreen() {
   const { setHidden } = useUIChrome();
 
   
-  const [mode, setMode] = useState<'setup' | 'preview' | 'capture'>('setup');
+  const [mode, setMode] = useState<'setup' | 'preview' | 'capture' | 'calibrate'>('setup');
   const [recording, setRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -56,11 +57,16 @@ export default function RecorderScreen() {
   const [selectedLeaderboardTag, setSelectedLeaderboardTag] = useState<string | null>(null);
   const [prepping, setPrepping] = useState(false); // blocks Ready while fetching topic
 
-  const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://your.backend.root';
+  //Abort recording ref
+  const modeRef = React.useRef(mode);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+
+
+  const API_BASE = process.env.EXPO_PUBLIC_API_BASE;
 
   // Hide chrome while in preview (countdown screen) or capture.
   useEffect(() => {
-    const hide = (mode === 'preview' || mode === 'capture') && (recording || uploading || countdown !== null || mode === 'preview');
+    const hide = mode !== 'setup';
     setHidden(hide);
     return () => setHidden(false);
   }, [mode, recording, uploading, countdown, setHidden]);
@@ -147,6 +153,8 @@ export default function RecorderScreen() {
 
 
   const doUpload = React.useCallback(async (uri: string) => {
+    if (abortedRef.current || modeRef.current !== 'capture') return;
+    
     setUploading(true);
     try {
       const nowTopic = String(assignedTopicRef.current || '');  // <- always fresh
@@ -154,6 +162,9 @@ export default function RecorderScreen() {
       const filename = uri.split('/').pop() || `mobile_frontFacing_${Date.now()}.mp4`;
       const token = await getValidAccessToken();
       if (!token) throw new Error('Not authenticated');
+
+      // Re-check after any awaits as well
+      if (abortedRef.current || modeRef.current !== 'capture') { setUploading(false); return; }
 
       // build the text right here to avoid stale closures
       const metadataText =
@@ -184,6 +195,7 @@ export default function RecorderScreen() {
       });
 
       setUploading(false);
+      if (abortedRef.current || modeRef.current !== 'capture') return;
       if (res.status < 200 || res.status >= 300) {
         Alert.alert('Upload failed', res.body || `HTTP ${res.status}`);
         setMode('setup');
@@ -195,6 +207,7 @@ export default function RecorderScreen() {
       setMode('setup');
     } catch (e: any) {
       setUploading(false);
+      if (abortedRef.current) return;
       Alert.alert('Upload exception', e?.message || String(e));
       setMode('setup');
     }
@@ -213,22 +226,28 @@ export default function RecorderScreen() {
 
 
 
-  const abortAll = useCallback(async () => {
-    // Abort preview countdown if active
-    if (mode === 'preview' && countdown !== null) {
-      if (countdownTimer.current) { clearInterval(countdownTimer.current); countdownTimer.current = null; }
-      setCountdown(null);
-      setMode('setup');
-      return;
+  const abortAll = useCallback(() => {
+    // stop preview countdown
+    if (countdownTimer.current) {
+      clearInterval(countdownTimer.current);
+      countdownTimer.current = null;
     }
-    // Abort active capture recording
-    if (mode === 'capture' && recording) {
-      abortedRef.current = true;
-      try { await camRef.current?.stopRecording(); } catch {}
-    } else if (mode === 'capture') {
-      setMode('setup');
-    }
-  }, [mode, countdown, recording]);
+    setCountdown(null);
+
+    // mark flow as cancelled for any awaiting code
+    abortedRef.current = true;
+
+    // stop camera (sync)
+    try {
+      camRef.current?.stopRecording?.();
+    } catch {}
+
+    // reset UI and mode (update ref immediately so guards trigger)
+    setRecording(false);
+    setUploading(false);
+    modeRef.current = 'setup';
+    setMode('setup');
+  }, []);
 
   // Get first topic *title* from the leaderboard's topics JSON via presigned URL
   const fetchFirstTopicFromLeaderboard = useCallback(async (tag: string): Promise<string | null> => {
@@ -269,6 +288,7 @@ export default function RecorderScreen() {
       await doUpload(vid.uri); // <- now the up-to-date doUpload
     } catch (e: any) {
       setRecording(false);
+      if (abortedRef.current) return;
       Alert.alert('Recording error', e?.message || String(e));
       setMode('setup');
     }
@@ -311,6 +331,8 @@ export default function RecorderScreen() {
             followedBoards={followedBoards}
             selectedLeaderboardTag={selectedLeaderboardTag}
             setSelectedLeaderboardTag={setSelectedLeaderboardTag}
+
+            onOpenCameraSetup={() => setMode('calibrate')}
 
             onReady={async () => {
               if (!authReady || !isAuthenticated) {
@@ -379,6 +401,16 @@ export default function RecorderScreen() {
     );
   }
 
+  if (mode === 'calibrate') {
+    return (
+      <View style={{ flex: 1, backgroundColor: COLORS.black }}>
+        <CameraSetupPanel
+          onDone={() => setMode('setup')}
+          onCancel={() => setMode('setup')}
+        />
+      </View>
+    );
+  }
 
   // Capture mode (header/footer hidden via UIChromeContext)
   return (

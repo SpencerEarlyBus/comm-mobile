@@ -79,6 +79,7 @@ function getMetricValue(session: MobileSession | undefined, key: string): number
 }
 
 /** --- Cards --- */
+/** --- Cards --- */
 function SessionSummaryCard({ s }: { s: MobileSession }) {
   const score = Math.max(0, Math.min(100, Number(s.overall_score ?? 0)));
   let tier = 'Rising';
@@ -90,28 +91,34 @@ function SessionSummaryCard({ s }: { s: MobileSession }) {
   return (
     <Card style={{ marginHorizontal: S.md, marginTop: S.sm, padding: S.md }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        {/* Left: stacked info */}
         <View style={{ flex: 1, paddingRight: S.md }}>
-          <Text style={styles.h2} numberOfLines={1}>
+          <Text style={styles.h2} numberOfLines={2}>
             {s.topic || 'Session'}
           </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-            <Text style={styles.subtle} numberOfLines={1}>
-              {formatDate(s.created_at)}{s.leaderboard_tag ? ` • ${s.leaderboard_tag}` : ''}
-            </Text>
-            {/* tiny chip */}
-            <View style={{ marginLeft: 8, paddingVertical: 2, paddingHorizontal: 8, borderRadius: 999, backgroundColor: C.accent }}>
+
+          {/* created at */}
+          <Text style={[styles.subtle, { marginTop: 4 }]} numberOfLines={1}>
+            {formatDate(s.created_at)}
+          </Text>
+
+          {/* chips row: leaderboard tag + tier */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+            <View
+              style={{
+                paddingVertical: 2,
+                paddingHorizontal: 8,
+                borderRadius: 999,
+                backgroundColor: C.accent,
+              }}
+            >
               <Text style={{ color: C.bg, fontWeight: '700', fontSize: 12 }}>{tier}</Text>
             </View>
           </View>
         </View>
 
-        <MetricDial
-          label="Overall"
-          value={score}
-          size={84}
-          stroke={8}
-          active={false}
-        />
+        {/* Right: dial */}
+        <MetricDial label="Overall" value={score} size={84} stroke={8} active={false} />
       </View>
     </Card>
   );

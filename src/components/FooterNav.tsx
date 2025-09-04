@@ -1,6 +1,14 @@
 // src/components/FooterNav.tsx
 import React from 'react';
-import { View, Pressable, Text, StyleSheet, useWindowDimensions } from 'react-native';
+import {
+  View,
+  Pressable,
+  Text,
+  StyleSheet,
+  useWindowDimensions,
+  Animated,
+  Easing,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navGo } from '../navigation/navRef';
@@ -10,20 +18,54 @@ type Props = { currentRoute?: string };
 export const FOOTER_BAR_HEIGHT = 64;
 
 export default function FooterNav({ currentRoute }: Props) {
+  // ✅ Always run hooks, regardless of hidden/currentRoute
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { hidden } = useUIChrome();
-  if (hidden) return null;
 
-  // Responsive scaling around ~390pt baseline
+  // responsive sizes
   const base = 390;
   const scale = Math.min(Math.max(width / base, 0.9), 1.15);
-
-  const ICON_SIZE = Math.round(22 * scale);          // all icons same size
-  const REC_BTN = Math.round(44 * scale);            // circular bg for record
-  const REC_BTN_CLAMP = Math.min(Math.max(REC_BTN, 40), 52); // keep tidy
+  const ICON_SIZE = Math.round(22 * scale);
+  const REC_BTN = Math.round(44 * scale);
+  const REC_BTN_CLAMP = Math.min(Math.max(REC_BTN, 40), 52);
 
   const isActive = (r: string) => currentRoute === r;
+
+  // 🔴 Pulse halo animation — keep hooks at top-level
+  const isRecorderActive = currentRoute === 'Recorder' && !hidden;
+  const pulse = React.useRef(new Animated.Value(0)).current;
+  const loopRef = React.useRef<Animated.CompositeAnimation | null>(null);
+
+  React.useEffect(() => {
+    if (isRecorderActive) {
+      const up = Animated.timing(pulse, {
+        toValue: 1,
+        duration: 1100,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      });
+      const down = Animated.timing(pulse, {
+        toValue: 0,
+        duration: 1100,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      });
+      const loop = Animated.loop(Animated.sequence([up, down]));
+      loopRef.current = loop;
+      loop.start();
+    } else {
+      loopRef.current?.stop();
+      pulse.setValue(0);
+    }
+    return () => loopRef.current?.stop();
+  }, [isRecorderActive, pulse]);
+
+  // ✅ Only now decide to render nothing
+  if (hidden) return null;
+
+  const haloOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.18, 0.45] });
+  const haloScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] });
 
   return (
     <View pointerEvents="box-none" style={{ ...StyleSheet.absoluteFillObject }}>
@@ -61,21 +103,41 @@ export default function FooterNav({ currentRoute }: Props) {
           />
         </NavSlot>
 
-        {/* 3. Record (center) — no label, white circular button */}
+        {/* 3. Record — pulsing halo when active route is Recorder */}
         <NavSlot>
-          <Pressable
-            onPress={() => navGo('Recorder')}
-            hitSlop={10}
-            style={[
-              styles.recordBtn,
-              {
-                width: REC_BTN_CLAMP,
-                height: REC_BTN_CLAMP,
-                borderRadius: REC_BTN_CLAMP / 2,
-              },
-            ]}
-          >
-            <Ionicons name="videocam" size={ICON_SIZE + 2} color="#0f172a" />
+          <Pressable onPress={() => navGo('Recorder')} hitSlop={10}>
+            {({ pressed }) => (
+              <View style={styles.recWrapper}>
+                {isRecorderActive && (
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      styles.recHaloPulse,
+                      {
+                        width: REC_BTN_CLAMP + 20,
+                        height: REC_BTN_CLAMP + 20,
+                        borderRadius: (REC_BTN_CLAMP + 20) / 2,
+                        opacity: haloOpacity,
+                        transform: [{ scale: haloScale }],
+                      },
+                    ]}
+                  />
+                )}
+                <View
+                  style={[
+                    styles.recordBtn,
+                    {
+                      width: REC_BTN_CLAMP,
+                      height: REC_BTN_CLAMP,
+                      borderRadius: REC_BTN_CLAMP / 2,
+                    },
+                    pressed && { transform: [{ scale: 0.97 }] },
+                  ]}
+                >
+                  <Ionicons name="videocam" size={ICON_SIZE + 2} color="#0f172a" />
+                </View>
+              </View>
+            )}
           </Pressable>
         </NavSlot>
 
@@ -106,6 +168,7 @@ export default function FooterNav({ currentRoute }: Props) {
     </View>
   );
 }
+
 
 function NavSlot({ children }: { children: React.ReactNode }) {
   return <View style={styles.slot}>{children}</View>;
@@ -177,4 +240,18 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 6,
   },
+
+  recWrapper: { alignItems: 'center', justifyContent: 'center' },
+  recHaloPulse: {
+    position: 'absolute',
+    backgroundColor: 'rgba(239, 68, 68, 0.22)',
+    borderWidth: 1,
+    borderColor: '#ef4444',
+    shadowColor: '#ef4444',
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+
 });

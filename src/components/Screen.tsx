@@ -7,6 +7,8 @@ import {
   Platform,
   StyleProp,
   ViewStyle,
+  ScrollViewProps,
+  RefreshControlProps,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,6 +30,18 @@ type Props = {
   extraBottom?: number;
   /** iOS keyboard offset if you have a custom header; header was removed so default is 0 */
   keyboardOffset?: number;
+
+  /** Include safe-area top padding (default true). Set false if you render your own header above. */
+  includeTopInset?: boolean;
+  /** Include safe-area bottom padding (default true). Ignored if footerAware = true. */
+  includeBottomInset?: boolean;
+
+  /** Optional custom scroll component, defaults to RN ScrollView */
+  ScrollComponent?: React.ComponentType<ScrollViewProps>;
+  /** Props passed through to the scroll component */
+  scrollProps?: ScrollViewProps;
+  /** Convenience prop if you want to pass refreshControl directly */
+  refreshControl?: React.ReactElement<RefreshControlProps>;
 };
 
 export default function Screen({
@@ -39,12 +53,40 @@ export default function Screen({
   contentStyle,
   extraBottom = 12,
   keyboardOffset = 0,
+  ScrollComponent,
+  scrollProps,
+  refreshControl,
+  includeTopInset = true,
+  includeBottomInset = true,
 }: Props) {
   const insets = useSafeAreaInsets();
 
-  const paddingTop = insets.top; // keep content clear of the notch/camera
+  const paddingTop = includeTopInset ? insets.top : 0;
+  const baseBottom = includeBottomInset ? insets.bottom : 0;
   const paddingBottom =
-    insets.bottom + (footerAware ? FOOTER_BAR_HEIGHT + extraBottom : 0);
+    baseBottom + (footerAware ? FOOTER_BAR_HEIGHT + extraBottom : 0);
+
+  const ScrollImpl = ScrollComponent || ScrollView;
+
+  // Pull out pieces we want to control/merge ourselves
+  const {
+    contentContainerStyle: userContentContainerStyle,
+    refreshControl: rcFromProps,
+    ...restScrollProps
+  } = scrollProps || {};
+
+  const mergedContentContainerStyle: any = [
+    { paddingTop, paddingBottom },
+    contentStyle as any,
+  ];
+  if (userContentContainerStyle) {
+    // Allow caller to add more content container styles
+    if (Array.isArray(userContentContainerStyle)) {
+      mergedContentContainerStyle.push(...userContentContainerStyle);
+    } else {
+      mergedContentContainerStyle.push(userContentContainerStyle as any);
+    }
+  }
 
   const Wrapper = ({ children: inner }: { children: React.ReactNode }) => (
     <KeyboardAvoidingView
@@ -53,18 +95,18 @@ export default function Screen({
       keyboardVerticalOffset={Platform.OS === 'ios' ? keyboardOffset : 0}
     >
       {scroll ? (
-        <ScrollView
+        <ScrollImpl
           style={{ flex: 1 }}
-          contentContainerStyle={[
-            { paddingTop, paddingBottom },
-            contentStyle as any,
-          ]}
+          contentContainerStyle={mergedContentContainerStyle}
           keyboardDismissMode={Platform.OS === 'ios' ? 'on-drag' : 'interactive'}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          {...restScrollProps}
+          // Prefer explicit prop, fallback to scrollProps
+          refreshControl={refreshControl ?? rcFromProps}
         >
           {inner}
-        </ScrollView>
+        </ScrollImpl>
       ) : (
         <View style={[{ flex: 1, paddingTop, paddingBottom }, contentStyle]}>
           {inner}
