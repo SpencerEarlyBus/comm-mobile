@@ -9,6 +9,7 @@ import {
   ScrollView,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  Modal,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
@@ -16,10 +17,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import Screen from '../components/Screen';
 import HeaderBar from '../components/HeaderBar';
+import MetricsOnlyModal from '../components/MetricsOnlyModal';
 import { COLORS as C } from '../theme/colors';
+import AppCard from '../components/AppCard';
+import { T } from '../theme/typography';
+import { S } from '../theme/spacing';
 import { useAuth } from '../context/MobileAuthContext';
-
-// If your MetricDial path/props differ, tweak here:
 import MetricDial from '../components/MetricDial';
 
 type MyRating = {
@@ -76,6 +79,8 @@ type StandingItem = {
   average_score: number | null;
   session_count: number;
   last_updated: string | null;
+  metrics_average?: Record<string, number> | null;   // ← we’ll show this in the modal
+  last_session_id?: string | null;
 };
 
 export default function LeaderboardScreen() {
@@ -97,11 +102,17 @@ export default function LeaderboardScreen() {
   const [selectedTag, setSelectedTag] = React.useState<string | null>(null);
 
   // Standings state
-  const PAGE = 25;
+  const PAGE = 10;
   const [standings, setStandings] = React.useState<StandingItem[]>([]);
   const [standTotal, setStandTotal] = React.useState<number>(0);
   const [standLoading, setStandLoading] = React.useState(false);
   const [standOffset, setStandOffset] = React.useState(0);
+
+  // Modal state (metrics-only)
+  const [detail, setDetail] = React.useState<{
+    name: string;
+    metrics?: Record<string, number> | null;
+  } | null>(null);
 
   const loadMyBoards = React.useCallback(async () => {
     if (!isAuthenticated) {
@@ -151,9 +162,10 @@ export default function LeaderboardScreen() {
       }
       setStandLoading(true);
       try {
-        const url = `${API_BASE}/mobile/leaderboards/${encodeURIComponent(
-          tag
-        )}/standings?limit=${PAGE}&offset=${reset ? 0 : standOffset}`;
+        const url =
+          `${API_BASE}/mobile/leaderboards/${encodeURIComponent(tag)}/standings` +
+          `?limit=${PAGE}&offset=${reset ? 0 : standOffset}&include=metrics`;
+
         const res = await fetch(url);
         if (!res.ok) throw new Error('failed');
         const data = await res.json();
@@ -182,12 +194,11 @@ export default function LeaderboardScreen() {
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
     await Promise.all([loadMyBoards(), loadFollowed()]);
-    // Also refresh standings if a tag is selected
     if (selectedTag) await loadStandings(selectedTag, { reset: true });
     setRefreshing(false);
   }, [loadMyBoards, loadFollowed, selectedTag, loadStandings]);
 
-  // Build quick lookup
+  // Quick lookup for my boards
   const myByTag = React.useMemo(
     () => new Map(myBoards.map((b) => [b.leaderboard.tag, b] as const)),
     [myBoards]
@@ -221,7 +232,6 @@ export default function LeaderboardScreen() {
     if (!selectedTag && dialItems.length) {
       const first = dialItems[0].tag;
       setSelectedTag(first);
-      // initial standings load
       loadStandings(first, { reset: true });
     } else if (selectedTag && !dialItems.find((d) => d.tag === selectedTag)) {
       const next = dialItems[0]?.tag ?? null;
@@ -238,12 +248,12 @@ export default function LeaderboardScreen() {
   const selectedName =
     selectedMy?.leaderboard.name || selectedFollowed?.name || selectedTag || '';
 
-  // Normalize elo to arc
+  // Normalize elo to arc 0..100
   const normalizeElo = (elo: number | null | undefined) => {
     if (elo == null) return 0;
     const MIN = 800, MAX = 2400;
     const clamped = Math.max(MIN, Math.min(MAX, elo));
-    return Math.round(((clamped - MIN) / (MAX - MIN)) * 100); // 0..100
+    return Math.round(((clamped - MIN) / (MAX - MIN)) * 100);
   };
 
   const DIAL_SIZE = 84;
@@ -252,7 +262,6 @@ export default function LeaderboardScreen() {
     await Haptics.selectionAsync();
     setSelectedTag((prev) => {
       if (prev === tag) return prev;
-      // reset standings for new tag
       loadStandings(tag, { reset: true });
       return tag;
     });
@@ -280,6 +289,15 @@ export default function LeaderboardScreen() {
 
   const youEmail = selectedMy?.participant.user_email || null;
 
+
+  const youMetricsAvg = React.useMemo(() => {
+    if (!youEmail) return null;
+    const row = standings.find((r) =>
+      (r.user_email || '').trim().toLowerCase() === (youEmail || '').trim().toLowerCase()
+    );
+    return row?.metrics_average ?? null;
+  }, [standings, youEmail]);
+
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       {/* BG */}
@@ -304,7 +322,7 @@ export default function LeaderboardScreen() {
               Follow boards or record with a leaderboard tag to get started.
             </Text>
           ) : (
-            dialItems.map(d => {
+            dialItems.map((d) => {
               const eloText = d.rating != null ? String(Math.round(d.rating)) : '—';
               return (
                 <View key={d.tag} style={{ marginRight: 16 }}>
@@ -342,78 +360,87 @@ export default function LeaderboardScreen() {
       <Screen
         scroll
         footerAware
-        includeTopInset={false}               
-        contentStyle={styles.contentTight}    
+        includeTopInset={false}
+        contentStyle={styles.contentTight}
         ScrollComponent={ScrollView}
         scrollProps={{
           onScroll: onContentScroll,
           scrollEventThrottle: 16,
           refreshControl: (
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={C.white}
-            />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.white} />
           ),
         }}
       >
-        <View style={styles.rootTight}> 
+        <View style={styles.rootTight}>
           {/* Selected board: Your stats */}
           {selectedTag ? (
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle} numberOfLines={1}>
-                  {selectedName}
-                </Text>
-                <Text style={styles.tag}>@{selectedTag}</Text>
-              </View>
+            selectedMy ? (
+              <AppCard style={{ marginHorizontal: S.md, marginTop: S.md }}>
+                <Pressable
+                  onPress={async () => {
+                    await Haptics.selectionAsync();
+                    setDetail({ name: `${selectedName} — You`, metrics: youMetricsAvg ?? null });
+                  }}
+                  hitSlop={6}
+                  style={({ pressed }) => [pressed && { opacity: 0.96 }]}
+                >
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <Text style={T.h2} numberOfLines={1}>{selectedName}</Text>
+                    <Text style={[T.subtle, { marginLeft: S.sm }]}>@{selectedTag}</Text>
+                  </View>
 
-              {selectedMy ? (
-                <>
-                  <View style={styles.row}>
-                    <Text style={styles.kvLabel}>Rating</Text>
-                    <Text style={styles.kvValue}>
-                      {selectedMy.rating.rating ?? '—'}
-                      {fmtDelta(selectedMy.rating.rating_delta_last)}
-                    </Text>
+                  <View style={{ marginTop: S.sm, rowGap: 6 }}>
+                    <View style={styles.row}>
+                      <Text style={T.subtle}>Rating</Text>
+                      <Text style={T.semibold}>
+                        {selectedMy.rating.rating ?? '—'}
+                        {fmtDelta(selectedMy.rating.rating_delta_last)}
+                      </Text>
+                    </View>
+                    <View style={styles.row}>
+                      <Text style={T.subtle}>Rank</Text>
+                      <Text style={T.semibold}>
+                        {selectedMy.rating.rank && selectedMy.rating.board_size
+                          ? `#${selectedMy.rating.rank} of ${selectedMy.rating.board_size}`
+                          : '—'}
+                      </Text>
+                    </View>
+                    <View style={styles.row}>
+                      <Text style={T.subtle}>Sessions</Text>
+                      <Text style={T.semibold}>{selectedMy.rating.session_count}</Text>
+                    </View>
+                    <View style={styles.row}>
+                      <Text style={T.subtle}>Avg Score</Text>
+                      <Text style={T.semibold}>
+                        {selectedMy.rating.average_score != null ? Math.round(selectedMy.rating.average_score) : '—'}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={styles.row}>
-                    <Text style={styles.kvLabel}>Rank</Text>
-                    <Text style={styles.kvValue}>
-                      {selectedMy.rating.rank && selectedMy.rating.board_size
-                        ? `#${selectedMy.rating.rank} of ${selectedMy.rating.board_size}`
-                        : '—'}
-                    </Text>
-                  </View>
-                  <View style={styles.row}>
-                    <Text style={styles.kvLabel}>Sessions</Text>
-                    <Text style={styles.kvValue}>{selectedMy.rating.session_count}</Text>
-                  </View>
-                  <View style={styles.row}>
-                    <Text style={styles.kvLabel}>Avg Score</Text>
-                    <Text style={styles.kvValue}>
-                      {selectedMy.rating.average_score != null
-                        ? Math.round(selectedMy.rating.average_score)
-                        : '—'}
-                    </Text>
-                  </View>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.subtitle}>
-                    You’re following this board but haven’t recorded on it yet.
-                  </Text>
-                  <Text style={styles.muted}>
-                    Record a session with this leaderboard tag to get placed.
-                  </Text>
-                </>
-              )}
-            </View>
+
+                  <Text style={[T.subtle, { marginTop: S.sm }]}>Tap to view your metric averages</Text>
+                </Pressable>
+              </AppCard>
+            ) : (
+              <AppCard style={{ marginHorizontal: S.md, marginTop: S.md }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <Text style={T.h2} numberOfLines={1}>{selectedName}</Text>
+                  <Text style={[T.subtle, { marginLeft: S.sm }]}>@{selectedTag}</Text>
+                </View>
+                <Text style={[T.body, { marginTop: S.xs }]}>
+                  You’re following this board but haven’t recorded on it yet.
+                </Text>
+                <Text style={[T.subtle, { marginTop: S.xs }]}>
+                  Record a session with this leaderboard tag to get placed.
+                </Text>
+              </AppCard>
+            )
           ) : null}
+
+
 
           {/* Standings */}
           {selectedTag ? (
-            <View style={styles.tableCard}>
+            <AppCard padded={false} style={{ marginHorizontal: S.md, marginTop: S.md }}>
               <View style={styles.tableHeader}>
                 <Text style={[styles.th, { width: 36, textAlign: 'center' }]}>#</Text>
                 <Text style={[styles.th, { flex: 1 }]}>User</Text>
@@ -423,54 +450,51 @@ export default function LeaderboardScreen() {
               </View>
 
               {standLoading && standings.length === 0 ? (
-                <Text style={[styles.muted, { padding: 12 }]}>Loading standings…</Text>
+                <Text style={[T.subtle, { padding: S.md }]}>Loading standings…</Text>
               ) : standings.length === 0 ? (
-                <Text style={[styles.muted, { padding: 12 }]}>No entries yet.</Text>
+                <Text style={[T.subtle, { padding: S.md }]}>No entries yet.</Text>
               ) : (
                 standings.map((row, idx) => {
                   const place = idx + 1 + Math.max(0, standOffset - standings.length);
                   const isYou = sameEmail(row.user_email, youEmail);
-                  const name =
-                    row.display_name ||
-                    (row.user_email ? row.user_email.split('@')[0] : 'Anonymous');
+                  const name = row.display_name || (row.user_email ? row.user_email.split('@')[0] : 'Anonymous');
 
                   return (
-                    <View
+                    <Pressable
                       key={`${row.user_email}-${idx}`}
-                      style={[
+                      onPress={async () => {
+                        await Haptics.selectionAsync();
+                        setDetail({ name, metrics: row.metrics_average ?? null });
+                      }}
+                      style={({ pressed }) => [
                         styles.tr,
                         isYou && { backgroundColor: 'rgba(14,165,233,0.12)' },
+                        pressed && { opacity: 0.95 },
                       ]}
                     >
                       <Text style={[styles.td, styles.rankCell]}>{place}</Text>
 
                       <View style={styles.participantCell}>
                         <View style={styles.avatar}>
-                          <Text style={styles.avatarText}>
-                            {initials(row.display_name, row.user_email)}
-                          </Text>
+                          <Text style={styles.avatarText}>{initials(row.display_name, row.user_email)}</Text>
                         </View>
                         <View style={styles.participantTextCol}>
                           <Text style={styles.name} numberOfLines={1}>{name}</Text>
-                          {!!row.user_email && (
-                            <Text style={styles.subName} numberOfLines={1}>{row.user_email}</Text>
-                          )}
+                          {!!row.user_email && <Text style={styles.subName} numberOfLines={1}>{row.user_email}</Text>}
                         </View>
                       </View>
-
 
                       <Text style={[styles.td, styles.num]}>{Math.round(row.rating)}</Text>
                       <Text style={[styles.td, styles.num]}>
                         {row.average_score != null ? Math.round(row.average_score) : '—'}
                       </Text>
                       <Text style={[styles.td, styles.num]}>{row.session_count}</Text>
-                    </View>
+                    </Pressable>
                   );
                 })
               )}
 
-              {/* Pager */}
-              <View style={{ padding: 8 }}>
+              <View style={{ padding: S.sm }}>
                 {standOffset < standTotal ? (
                   <Pressable
                     style={({ pressed }) => [
@@ -480,182 +504,166 @@ export default function LeaderboardScreen() {
                     onPress={() => loadStandings(selectedTag, { reset: false })}
                     disabled={standLoading}
                   >
-                    <Text style={styles.loadMoreText}>
-                      {standLoading ? 'Loading…' : 'Load more'}
-                    </Text>
+                    <Text style={styles.loadMoreText}>{standLoading ? 'Loading…' : 'Load more'}</Text>
                   </Pressable>
                 ) : standings.length > 0 ? (
-                  <Text style={[styles.muted, { textAlign: 'center', paddingVertical: 6 }]}>
-                    End of standings
-                  </Text>
+                  <Text style={[T.subtle, { textAlign: 'center', paddingVertical: 6 }]}>End of standings</Text>
                 ) : null}
               </View>
-            </View>
+            </AppCard>
           ) : null}
         </View>
       </Screen>
+
+      {/* METRICS-ONLY MODAL */}
+      <MetricsOnlyModal
+        visible={!!detail}
+        onClose={() => setDetail(null)}
+        name={detail?.name ?? ''}
+        metrics={detail?.metrics ?? {}}
+      />
     </View>
   );
 }
 
+/** ---------- Metrics-only modal (local to this screen) ---------- */
+
+
+function MetricBar({ label, value }: { label: string; value: number }) {
+  const v = Math.max(0, Math.min(100, Math.round(value)));
+  return (
+    <View style={{ marginTop: 10 }}>
+      <View style={mstyles.meterHeader}>
+        <Text style={mstyles.meterLabel}>{label}</Text>
+        <Text style={mstyles.meterValue}>{v}/100</Text>
+      </View>
+      <View style={mstyles.meterTrack}>
+        <View style={[mstyles.meterFill, { width: `${v}%` }]} />
+      </View>
+    </View>
+  );
+}
+
+/** ------------------------ Styles ------------------------ */
+
+/** ------------------------ Styles (normalized to AppCard/T/S) ------------------------ */
 const styles = StyleSheet.create({
-  // Sticky dial bar
+  // Top dials bar stays as-is
   dialsBar: {
-    paddingVertical: 8,
-    backgroundColor: 'rgba(15,23,42,0.75)',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: C.border,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: C.headerGlass,
   },
   dialsBarShadow: {
     shadowColor: '#000',
     shadowOpacity: 0.25,
     shadowRadius: 10,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
   },
-  dialsContent: {
-    paddingHorizontal: 12,   
-    alignItems: 'center',
+  dialsContent: { paddingRight: 8, alignItems: 'center' },
+
+  muted: { color: C.label },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
   },
 
-  container: { flex: 1, backgroundColor: C.bg },
-  contentTight: {
-    paddingHorizontal: 12,  // symmetric gutters like Sessions
-    paddingTop: 8,
-  },
-  rootTight: {
-    flex: 1,
-    // no paddingTop; keeps it snug under the dials bar
-    // bottom padding handled by Screen.footerAware
-    gap: 12,
-  },
+  // Screen padding uses spacing tokens
+  contentTight: { paddingTop: S.sm, paddingHorizontal: S.md, paddingBottom: 90 },
+  rootTight: { gap: S.sm },
 
-  subtitle: { fontSize: 14, color: C.label },
-  muted: { fontSize: 14, color: C.label },
+  // NOTE: no `card` or `tableCard` here — AppCard handles the container look
 
-  // Your stats card
-  card: {
-
-    backgroundColor: C.card,
-    borderColor: C.border,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
-    padding: 12,
-    gap: 6,
-  },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: C.text, flexShrink: 1, paddingRight: 8 },
-  tag: { fontSize: 12, color: C.label },
-  row: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 },
-  kvLabel: { color: C.label, fontSize: 12 },
-  kvValue: { color: C.white, fontSize: 14, fontWeight: '700' },
-
-  // Standings table
-  tableCard: {
-    backgroundColor: C.card,
-    borderColor: C.border,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
+  // Standings table inside AppCard
   tableHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    paddingHorizontal: S.md,
+    paddingTop: S.md,
+    paddingBottom: S.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: C.border,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
   },
-  th: { color: C.label, fontSize: 12, fontWeight: '600' },
+  th: { color: C.label, fontSize: 12, fontWeight: '700' },
+
   tr: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: S.md,
     paddingVertical: 10,
-    paddingHorizontal: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(148,163,184,0.15)',
+    borderBottomColor: C.border,
   },
   td: { color: C.text, fontSize: 14 },
-  rankCell: {
-    width: 36,
-    textAlign: 'center',
-    color: C.white,
-    fontWeight: '700',
-  },
-  num: { width: 72, textAlign: 'right', color: C.white, fontWeight: '700' },
+  rankCell: { width: 36, textAlign: 'center', color: C.label },
 
-  name: { color: C.white, fontSize: 14, fontWeight: '700' },
-  subName: { color: C.label, fontSize: 11 },
-
+  participantCell: { flex: 1, flexDirection: 'row', alignItems: 'center', columnGap: 10 },
   avatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(148,163,184,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: 'rgba(148,163,184,0.22)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  avatarText: { color: C.white, fontSize: 12, fontWeight: '700' },
+  avatarText: { color: C.text, fontWeight: '800', fontSize: 12 },
+  participantTextCol: { flex: 1 },
+  name: { color: C.text, fontWeight: '700', fontSize: 14 },
+  subName: { color: C.subtext, fontSize: 12, marginTop: 2 },
 
-  youPill: {
-    marginLeft: 8,
-    fontSize: 10,
-    color: C.activeLabelText,
-    backgroundColor: C.activeLabelBg,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 999,
-    overflow: 'hidden',
-    fontWeight: '700',
-  },
+  num: { width: 72, textAlign: 'right', color: C.text },
 
   loadMore: {
-    marginTop: 4,
     alignSelf: 'center',
-    backgroundColor: 'rgba(148,163,184,0.12)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: C.accent,
+  },
+  loadMoreText: { color: C.bg, fontWeight: '700' },
+});
+
+
+
+const mstyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: S.md,
+  },
+  // Same card look as AppCard
+  card: {
+    width: '100%',
+    maxWidth: 520,
+    backgroundColor: C.card,
+    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: C.border,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    padding: S.md,
   },
-  loadMoreText: { color: C.white, fontSize: 13, fontWeight: '700' },
-
-  participantCell: {
-    flex: 1,
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: S.xs,
   },
-  participantTextCol: {
-    flex: 1,
-    marginLeft: 8, // replace gap
-  },
+  title: T.h2,                 // typography token
+  close: { color: C.label, fontSize: 20, paddingHorizontal: 6, paddingVertical: 2 },
+  muted: T.subtle,             // typography token
 
-  dialWrap: {
-    marginRight: 16,
-  },
-  dialInner: {
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dialCenterOverlay: {
-    position: 'absolute',
-    left: 0, right: 0, top: 0, bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,     // gives the Text some breathing room
-  },
-  eloText: {
-    color: C.white,
-    fontWeight: '800',
-    fontSize: 18,             // base; will auto-shrink if needed
-    textAlign: 'center',
-    includeFontPadding: false,
-  },
-
-
-
+  meterHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  meterLabel: { ...T.body, fontWeight: '700' },  // readable label
+  meterValue: { color: C.text, fontSize: 12, fontWeight: '700' },
+  meterTrack: { height: 8, backgroundColor: C.track, borderRadius: 999, overflow: 'hidden', marginTop: 4 },
+  meterFill: { height: 8, backgroundColor: C.accent, borderRadius: 999 },
 });
+
+
+
+
+
+
+
+
+

@@ -3,6 +3,7 @@ export const COLORS = {
   accent: '#0ea5e9',
   text: '#e2e8f0',
   label: '#cbd5e1',
+  subtext: '#94a3b8',
   track: 'rgba(148,163,184,0.25)',
   ringBg: 'rgba(15,23,42,0.85)',
 

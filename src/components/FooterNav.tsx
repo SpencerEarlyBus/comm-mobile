@@ -6,9 +6,8 @@ import {
   Text,
   StyleSheet,
   useWindowDimensions,
-  Animated,
-  Easing,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';   // ⬅️ NEW
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navGo } from '../navigation/navRef';
@@ -18,12 +17,11 @@ type Props = { currentRoute?: string };
 export const FOOTER_BAR_HEIGHT = 64;
 
 export default function FooterNav({ currentRoute }: Props) {
-  // ✅ Always run hooks, regardless of hidden/currentRoute
+  // hooks (always run)
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { hidden } = useUIChrome();
 
-  // responsive sizes
   const base = 390;
   const scale = Math.min(Math.max(width / base, 0.9), 1.15);
   const ICON_SIZE = Math.round(22 * scale);
@@ -31,41 +29,9 @@ export default function FooterNav({ currentRoute }: Props) {
   const REC_BTN_CLAMP = Math.min(Math.max(REC_BTN, 40), 52);
 
   const isActive = (r: string) => currentRoute === r;
-
-  // 🔴 Pulse halo animation — keep hooks at top-level
   const isRecorderActive = currentRoute === 'Recorder' && !hidden;
-  const pulse = React.useRef(new Animated.Value(0)).current;
-  const loopRef = React.useRef<Animated.CompositeAnimation | null>(null);
 
-  React.useEffect(() => {
-    if (isRecorderActive) {
-      const up = Animated.timing(pulse, {
-        toValue: 1,
-        duration: 1100,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      });
-      const down = Animated.timing(pulse, {
-        toValue: 0,
-        duration: 1100,
-        easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
-      });
-      const loop = Animated.loop(Animated.sequence([up, down]));
-      loopRef.current = loop;
-      loop.start();
-    } else {
-      loopRef.current?.stop();
-      pulse.setValue(0);
-    }
-    return () => loopRef.current?.stop();
-  }, [isRecorderActive, pulse]);
-
-  // ✅ Only now decide to render nothing
   if (hidden) return null;
-
-  const haloOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.18, 0.45] });
-  const haloScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] });
 
   return (
     <View pointerEvents="box-none" style={{ ...StyleSheet.absoluteFillObject }}>
@@ -103,43 +69,38 @@ export default function FooterNav({ currentRoute }: Props) {
           />
         </NavSlot>
 
-        {/* 3. Record — pulsing halo when active route is Recorder */}
+        {/* 3. Record — red when active */}
         <NavSlot>
           <Pressable onPress={() => navGo('Recorder')} hitSlop={10}>
-            {({ pressed }) => (
-              <View style={styles.recWrapper}>
-                {isRecorderActive && (
-                  <Animated.View
-                    pointerEvents="none"
+            {({ pressed }) => {
+              const isRecorderActive = currentRoute === 'Recorder';
+              return (
+                <View style={styles.recWrapper}>
+                  <View
                     style={[
-                      styles.recHaloPulse,
+                      styles.recordBtn,
+                      isRecorderActive && styles.recordBtnActive,
                       {
-                        width: REC_BTN_CLAMP + 20,
-                        height: REC_BTN_CLAMP + 20,
-                        borderRadius: (REC_BTN_CLAMP + 20) / 2,
-                        opacity: haloOpacity,
-                        transform: [{ scale: haloScale }],
+                        width: REC_BTN_CLAMP,
+                        height: REC_BTN_CLAMP,
+                        borderRadius: REC_BTN_CLAMP / 2,
                       },
+                      pressed && { transform: [{ scale: 0.97 }] },
                     ]}
-                  />
-                )}
-                <View
-                  style={[
-                    styles.recordBtn,
-                    {
-                      width: REC_BTN_CLAMP,
-                      height: REC_BTN_CLAMP,
-                      borderRadius: REC_BTN_CLAMP / 2,
-                    },
-                    pressed && { transform: [{ scale: 0.97 }] },
-                  ]}
-                >
-                  <Ionicons name="videocam" size={ICON_SIZE + 2} color="#0f172a" />
+                  >
+                    <Ionicons
+                      name="videocam"
+                      size={ICON_SIZE + 2}
+                      color={isRecorderActive ? '#ffffff' : '#0f172a'}
+                    />
+                  </View>
                 </View>
-              </View>
-            )}
+              );
+            }}
           </Pressable>
         </NavSlot>
+
+
 
         {/* 4. Topics */}
         <NavSlot>
@@ -168,7 +129,6 @@ export default function FooterNav({ currentRoute }: Props) {
     </View>
   );
 }
-
 
 function NavSlot({ children }: { children: React.ReactNode }) {
   return <View style={styles.slot}>{children}</View>;
@@ -209,8 +169,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15, 23, 42, 0.94)',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(148,163,184,0.25)',
-
-    // five equal slots across
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -220,14 +178,13 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 68, // helps spacing on very narrow screens
+    minWidth: 68,
   },
 
   tab: { alignItems: 'center', justifyContent: 'center' },
   label: { color: '#cbd5e1', fontSize: 12, fontWeight: '600', marginTop: 2, textAlign: 'center' },
   labelActive: { color: '#fff' },
 
-  // Center record button (white to stand out), same visual footprint as others
   recordBtn: {
     backgroundColor: '#fff',
     borderWidth: 2,
@@ -241,17 +198,12 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
-  recWrapper: { alignItems: 'center', justifyContent: 'center' },
-  recHaloPulse: {
-    position: 'absolute',
-    backgroundColor: 'rgba(239, 68, 68, 0.22)',
-    borderWidth: 1,
-    borderColor: '#ef4444',
-    shadowColor: '#ef4444',
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
+  recordBtnActive: {
+    backgroundColor: '#ef4444',   // red circle when active
+    borderColor: '#fca5a5',       // softer red border
   },
-
+  recWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });
