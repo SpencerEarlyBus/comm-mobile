@@ -545,8 +545,6 @@ function MetricBar({ label, value }: { label: string; value: number }) {
 }
 
 /** ------------------------ Styles ------------------------ */
-
-/** ------------------------ Styles (normalized to AppCard/T/S) ------------------------ */
 const styles = StyleSheet.create({
   // Top dials bar stays as-is
   dialsBar: {

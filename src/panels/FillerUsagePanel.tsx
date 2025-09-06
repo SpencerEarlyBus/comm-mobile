@@ -1,15 +1,42 @@
 // src/panels/FillerUsagePanel.tsx
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { View, Text, ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 import type { PanelProps } from './Panel.types';
 import { useSessionTextA } from '../hooks/useSessionTextA';                  // transcript
 import { useSessionFillersTxt } from '../hooks/useSessionFillersTxt';        // fillers stats
 import { errorMsg } from '../utils/errorMsg';
 import CollapsibleBox from '../components/CollapsibleBox';
-import { HighlightedTranscript } from '../utils/highlightFillers';
+import { HighlightedTranscript, dedupeTrailingSentences } from '../utils/highlightFillers';
 import { COLORS as C } from '../theme/colors';
 
 const P = { pad: 12, radius: 12 };
+
+// --- helpers for adjusted counts (post-dedupe) ---
+const escapeRx = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function countWords(s: string): number {
+  // count word-like tokens (handles "I'm" etc.)
+  return (s.match(/[A-Za-z0-9']+/g) || []).length;
+}
+
+function buildTermsRegex(terms: string[] | undefined) {
+  if (!terms?.length) return null;
+  const pattern = terms
+    .map(t => escapeRx(t).replace(/\s+/g, '\\s+')) // allow flexible whitespace inside phrases
+    .filter(Boolean)
+    .join('|');
+  if (!pattern) return null;
+  // case-insensitive, non-overlapping global matches; "word-ish" boundaries
+  return new RegExp(`(?:(?<=^)|(?<=[^A-Za-z]))(${pattern})(?:(?=$)|(?=[^A-Za-z]))`, 'gi');
+}
+
+function countFillersIn(text: string, terms: string[] | undefined): number {
+  const rx = buildTermsRegex(terms);
+  if (!rx) return 0;
+  let count = 0;
+  while (rx.exec(text)) count++;
+  return count;
+}
 
 function Meter({ label, value, right }: { label: string; value: number; right?: string }) {
   const v = Math.max(0, Math.min(100, Math.round(value)));
@@ -31,18 +58,35 @@ export default function FillerUsagePanel({ sessionId }: PanelProps) {
   const { text: transcript, isLoading: tLoading, isError: tErr, error: tError, refetch: refetchT } =
     useSessionTextA(sessionId, true);
 
-  // Fillers stats
+  // Fillers stats (provides `terms` and categories)
   const { stats, isLoading: fLoading, isError: fErr, error: fError, refetch: refetchF } =
     useSessionFillersTxt(sessionId, true);
 
   const onRetry = useCallback(() => { refetchT(); refetchF(); }, [refetchT, refetchF]);
 
-  const densityPct = stats?.density != null
-    ? Math.round((stats.density <= 1 ? stats.density : stats.density / 100) * 100)
-    : undefined;
+  // 1) Clean transcript by removing trailing repeated sentences/phrases
+  const cleanedTranscript = useMemo(
+    () => (transcript ? dedupeTrailingSentences(transcript) : ''),
+    [transcript]
+  );
 
-  const total = stats?.totalWords ?? 0;
-  const fillers = stats?.fillerWords ?? 0;
+  // 2) Recompute counts from cleaned transcript
+  const adjusted = useMemo(() => {
+    const totalWords = cleanedTranscript ? countWords(cleanedTranscript) : 0;
+    const fillerWords = cleanedTranscript ? countFillersIn(cleanedTranscript, stats?.terms || []) : 0;
+
+    // density as simple ratio (we can't reproduce server "weighted" exactly on client)
+    const densityPct = totalWords > 0 ? Math.round((fillerWords / totalWords) * 100) : undefined;
+
+    return { totalWords, fillerWords, densityPct };
+  }, [cleanedTranscript, stats?.terms]);
+
+  // Keep a fallback to server density if for some reason adjusted can't be computed
+  const densityPct = adjusted.densityPct != null
+    ? adjusted.densityPct
+    : (stats?.density != null
+        ? Math.round((stats.density <= 1 ? stats.density : stats.density / 100) * 100)
+        : undefined);
 
   return (
     <View style={{ marginHorizontal: 16, marginTop: 10 }}>
@@ -80,15 +124,15 @@ export default function FillerUsagePanel({ sessionId }: PanelProps) {
           <View style={{ gap: 10 }}>
             <View style={styles.card}>
               <View style={styles.inlineStat}>
-                <Text style={styles.kvLabel}>Total words</Text>
-                <Text style={styles.kvValue}>{total}</Text>
+                <Text style={styles.kvLabel}>Total words (after de-dupe)</Text>
+                <Text style={styles.kvValue}>{adjusted.totalWords}</Text>
               </View>
               <View style={styles.inlineStat}>
-                <Text style={styles.kvLabel}>Filler words</Text>
-                <Text style={styles.kvValue}>{fillers}</Text>
+                <Text style={styles.kvLabel}>Filler words (after de-dupe)</Text>
+                <Text style={styles.kvValue}>{adjusted.fillerWords}</Text>
               </View>
               <View style={styles.inlineStat}>
-                <Text style={styles.kvLabel}>Weighted density</Text>
+                <Text style={styles.kvLabel}>Filler density (adjusted)</Text>
                 <Text style={styles.kvValue}>
                   {densityPct != null ? `${densityPct}%` : '—'}
                 </Text>
@@ -102,7 +146,7 @@ export default function FillerUsagePanel({ sessionId }: PanelProps) {
               )}
             </View>
 
-            {/* Category tallies */}
+            {/* Category tallies (server-calculated; still useful context) */}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>By category</Text>
               <View style={styles.inlineStat}>
@@ -122,10 +166,10 @@ export default function FillerUsagePanel({ sessionId }: PanelProps) {
                 <Text style={styles.kvValue}>{stats.byCategory?.self_correction ?? 0}</Text>
               </View>
 
-              {/* Optional density bar */}
               {densityPct != null && (
                 <>
                   <View style={{ height: 8 }} />
+                  {/* Lower density is better → invert for the bar */}
                   <Meter label="Filler density" value={100 - densityPct} right={`${densityPct}%`} />
                   <Text style={styles.tip}>
                     Aim for a lower density. Practice pausing instead of using fillers.
@@ -145,7 +189,7 @@ export default function FillerUsagePanel({ sessionId }: PanelProps) {
         headerTint={C.text}
         borderColor={C.border}
       >
-        {(tLoading) ? (
+        {tLoading ? (
           <View style={styles.centerBox}>
             <ActivityIndicator />
             <Text style={styles.loadingText}>Loading transcript…</Text>
@@ -163,7 +207,7 @@ export default function FillerUsagePanel({ sessionId }: PanelProps) {
             contentContainerStyle={{ padding: 14 }}
             showsVerticalScrollIndicator={false}
           >
-            <HighlightedTranscript text={transcript} terms={stats?.terms || []} />
+            <HighlightedTranscript text={cleanedTranscript} terms={stats?.terms || []} />
           </ScrollView>
         ) : (
           <Text style={styles.emptyText}>No transcript available.</Text>

@@ -23,10 +23,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useIsFocused } from '@react-navigation/native';
 import { AppState } from 'react-native';
 import { focusManager } from '@tanstack/react-query';
+import { Ionicons } from '@expo/vector-icons';
+import { navGo } from '../navigation/navRef';
 
 
 import Card from '../components/Card';
-import { C, S } from '../theme/tokens'; // { colors, spacing, radii }, adjust path if needed
+import AppCard from '../components/AppCard';
+import { C, S } from '../theme/tokens'; // { colors, spacing, radii }
 
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://your.api.domain';
 
@@ -89,7 +92,7 @@ function SessionSummaryCard({ s }: { s: MobileSession }) {
   else if (score >= 60) tier = 'Advanced';
 
   return (
-    <Card style={{ marginHorizontal: S.md, marginTop: S.sm, padding: S.md }}>
+    <AppCard style={{ marginHorizontal: S.md, marginTop: S.sm }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         {/* Left: stacked info */}
         <View style={{ flex: 1, paddingRight: S.md }}>
@@ -120,7 +123,7 @@ function SessionSummaryCard({ s }: { s: MobileSession }) {
         {/* Right: dial */}
         <MetricDial label="Overall" value={score} size={84} stroke={8} active={false} />
       </View>
-    </Card>
+    </AppCard>
   );
 }
 
@@ -133,7 +136,7 @@ function LeaderboardAdjustmentsCard({ s }: { s: MobileSession }) {
   else if (score >= 60) tier = 'Advanced';
 
   return (
-    <Card style={{ marginHorizontal: S.md, marginTop: S.md, padding: S.md }}>
+    <AppCard style={{ marginHorizontal: S.md, marginTop: S.md }}>
       <Text style={styles.h2}>Leaderboard impact</Text>
 
       <Text style={[styles.body, { marginTop: S.xs }]}>
@@ -171,13 +174,13 @@ function LeaderboardAdjustmentsCard({ s }: { s: MobileSession }) {
           </Pressable>
         )}
       </View>
-    </Card>
+    </AppCard>
   );
 }
 
 function InsightsCard() {
   return (
-    <Card style={{ marginHorizontal: S.md, marginTop: S.md, padding: S.md, backgroundColor: '#0b1628' }}>
+    <AppCard style={{ marginHorizontal: S.md, marginTop: S.md }}>
       <Text style={styles.h2}>AI Insights (coming soon)</Text>
       <Text style={[styles.body, { marginTop: 6 }]}>
         This area will summarize your performance and suggest targeted improvements based on recent sessions.
@@ -185,9 +188,53 @@ function InsightsCard() {
       <Text style={{ marginTop: 10, color: C.accent, fontWeight: '700' }}>
         ↑ Tip: tap a dial above to learn more about that score
       </Text>
-    </Card>
+    </AppCard>
   );
 }
+
+
+
+function EmptyState({ bottomPad }: { bottomPad: number }) {
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: S.lg }}>
+      <Ionicons name="sparkles-outline" size={36} color={C.accent} />
+      <Text style={[styles.h2, { marginTop: 8 }]}>No sessions yet</Text>
+
+      <Text style={[styles.body, { textAlign: 'center', marginTop: 6 }]}>
+        Tap the record button below to run your first session. Your dials and feedback will appear here.
+      </Text>
+
+      <Pressable
+        onPress={async () => { await Haptics.selectionAsync(); navGo('Recorder'); }}
+        style={({ pressed }) => [
+          styles.buttonPrimary,
+          { marginTop: 12, paddingHorizontal: 16 },
+          pressed && styles.buttonPressed,
+        ]}
+        hitSlop={6}
+      >
+        <Text style={styles.buttonPrimaryText}>Go to Recorder</Text>
+      </Pressable>
+
+      {/* Arrow that points to the footer’s center button */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          bottom: bottomPad - 0,   // just above the footer
+          alignSelf: 'center',
+          alignItems: 'center',
+        }}
+      >
+        <Ionicons name="arrow-down-circle" size={28} color={C.accent} />
+        <Text style={{ color: C.subtext, fontSize: 12, marginTop: 4 }}>Record here</Text>
+      </View>
+    </View>
+  );
+}
+
+
+
 
 export default function SessionsScreen() {
   const { fetchWithAuth } = useAuth();
@@ -263,6 +310,8 @@ export default function SessionsScreen() {
     const completed = sessions.find(s => s.status === 'completed');
     return completed ?? sessions[0];
   }, [data, selectedSessionId]);
+  const hasSessions = (data?.length ?? 0) > 0;
+
 
   const anyInFlight = useMemo(
     () => (data ?? []).some(s => s.status === 'queued' || s.status === 'processing'),
@@ -312,76 +361,82 @@ export default function SessionsScreen() {
       />
 
       {/* Sticky, glassy metric dials bar */}
-      <View
-        style={[
-          {
-            paddingVertical: 8,
-            backgroundColor: 'rgba(15,23,42,0.75)',
-            borderTopWidth: StyleSheet.hairlineWidth,
-            borderBottomWidth: StyleSheet.hairlineWidth,
-            borderColor: C.border,
-          },
-          scrolled && {
-            shadowColor: '#000',
-            shadowOpacity: 0.25,
-            shadowRadius: 10,
-            shadowOffset: { width: 0, height: 8 },
-            elevation: 8,
-          },
-        ]}
+{/* If there are no sessions, show an empty-state landing */}
+{!hasSessions && !isFetching ? (
+  <EmptyState bottomPad={bottomPad} />
+) : (
+  <>
+    {/* Sticky, glassy metric dials bar */}
+    <View
+      style={[
+        {
+          paddingVertical: 8,
+          backgroundColor: 'rgba(15,23,42,0.75)',
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderColor: C.border,
+        },
+        scrolled && {
+          shadowColor: '#000',
+          shadowOpacity: 0.25,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 8 },
+          elevation: 8,
+        },
+      ]}
+    >
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: S.md, columnGap: S.md }}
       >
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: S.md, columnGap: S.md }}
-        >
-          {dialMetrics.map(m => (
-            <MetricDial
-              key={m.key}
-              label={m.label}
-              value={m.value}
-              active={selectedMetric === m.key}
-              onPress={async () => {
-                await Haptics.selectionAsync();           // ✅ haptic tap
-                setSelectedMetric(prev => (prev === m.key ? null : m.key));
-              }}
-            />
-          ))}
-        </ScrollView>
-      </View>
+        {dialMetrics.map((m) => (
+          <MetricDial
+            key={m.key}
+            label={m.label}
+            value={m.value}
+            active={selectedMetric === m.key}
+            onPress={async () => {
+              await Haptics.selectionAsync();
+              setSelectedMetric((prev) => (prev === m.key ? null : m.key));
+            }}
+          />
+        ))}
+      </ScrollView>
+    </View>
 
-      {/* Everything below dials can scroll */}
-      <View style={{ flex: 1 }}>
-        <ScrollView
-          contentContainerStyle={{ paddingBottom: 24 }}
-          showsVerticalScrollIndicator={false}
-          onScroll={(e) => setScrolled(e.nativeEvent.contentOffset.y > 2)} // ✅ toggle shadow
-          scrollEventThrottle={16}
-          refreshControl={
-            <RefreshControl
-              tintColor={C.accent}
-              colors={[C.accent]}
-              refreshing={isFetching}
-              onRefresh={() => refetch()}
-            />
-          }
-        >
-          {showSummary && !!sourceSession && (
-            <>
-              <SessionSummaryCard s={sourceSession} />
-              <LeaderboardAdjustmentsCard s={sourceSession} />
-              <InsightsCard />
-            </>
-          )}
+    {/* Everything below dials can scroll */}
+    <View style={{ flex: 1 }}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 24 }}
+        showsVerticalScrollIndicator={false}
+        onScroll={(e) => setScrolled(e.nativeEvent.contentOffset.y > 2)}
+        scrollEventThrottle={16}
+        refreshControl={
+          <RefreshControl
+            tintColor={C.accent}
+            colors={[C.accent]}
+            refreshing={isFetching}
+            onRefresh={() => refetch()}
+          />
+        }
+      >
+        {showSummary && !!sourceSession && (
+          <>
+            <SessionSummaryCard s={sourceSession} />
+            <LeaderboardAdjustmentsCard s={sourceSession} />
+            <InsightsCard />
+          </>
+        )}
 
-          {!!SelectedPanel && !!sourceSession && (
-            <SelectedPanel sessionId={sourceSession.id} />
-          )}
+        {!!SelectedPanel && !!sourceSession && <SelectedPanel sessionId={sourceSession.id} />}
 
-          {/* Spacer so the footer nav never covers content */}
-          <View style={{ height: FOOTER_BAR_HEIGHT + (insets.bottom || 0) + 12 }} />
-        </ScrollView>
-      </View>
+        {/* Spacer so the footer nav never covers content */}
+        <View style={{ height: FOOTER_BAR_HEIGHT + (insets.bottom || 0) + 12 }} />
+      </ScrollView>
+    </View>
+  </>
+)}
 
       <SessionPickerModal
         visible={pickerOpen}

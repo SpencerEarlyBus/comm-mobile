@@ -25,16 +25,41 @@ type FollowedBoard = {
   example_topic?: string | null;
 };
 
+/** ================== CONFIG (change here) ================== */
+const CAPTURE_CUTOFF_MS = 60_000;     // 1 minute hard stop for video
+const PREVIEW_SECONDS   = 10;         // countdown seconds before recording
+/** ========================================================== */
+
 export default function RecorderScreen() {
   const camRef = useRef<CameraView | null>(null);
   const { setHidden } = useUIChrome();
 
-  
   const [mode, setMode] = useState<'setup' | 'preview' | 'capture' | 'calibrate'>('setup');
   const [recording, setRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
+
+  const [cameraKey, setCameraKey] = useState(0);
+
+  // timers / guards
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const previewKickoffTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cutoffTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cutoffWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cutoffTickRef     = useRef<ReturnType<typeof setInterval> | null>(null);
+  const uploadStartedRef  = useRef(false);
+
+  const clearCutoffTimers = () => {
+    if (cutoffWatchdogRef.current) { clearTimeout(cutoffWatchdogRef.current); cutoffWatchdogRef.current = null; }
+    if (cutoffTickRef.current)     { clearInterval(cutoffTickRef.current);     cutoffTickRef.current = null; }
+  };
+
+  const forceStopRecording = () => {
+    try { camRef.current?.stopRecording?.(); } catch {}
+  };
+
+
+
   const abortedRef = useRef(false);
 
   const { user, authReady, isAuthenticated, getValidAccessToken, fetchWithAuth } = useAuth() as any;
@@ -57,10 +82,42 @@ export default function RecorderScreen() {
   const [selectedLeaderboardTag, setSelectedLeaderboardTag] = useState<string | null>(null);
   const [prepping, setPrepping] = useState(false); // blocks Ready while fetching topic
 
-  //Abort recording ref
+
+  // 1) Full reset helper (centralized)
+  const resetForNextRecording = useCallback(() => {
+    // stop ALL timers
+    if (countdownTimer.current) { clearInterval(countdownTimer.current); countdownTimer.current = null; }
+    if (previewKickoffTimer.current) { clearTimeout(previewKickoffTimer.current); previewKickoffTimer.current = null; }
+    clearCutoffTimers(); // your tick + watchdog clear
+
+    // UI state
+    setCountdown(null);
+    setRecording(false);
+    setUploading(false);
+
+    // guards for next run
+    uploadStartedRef.current = false;
+
+    // keep modeRef in sync (optional, but nice if you still read it anywhere)
+    modeRef.current = 'setup';
+
+    // remount camera to clear native recorder state
+    setCameraKey(k => k + 1);
+
+    // back to setup
+    setMode('setup');
+  }, []);
+    // 2) Abort — mark aborted, stop recording now, then fully reset
+  const abortAll = useCallback(() => {
+    abortedRef.current = true;                 // make in-flight paths bail
+    try { camRef.current?.stopRecording?.(); } catch {}
+    resetForNextRecording();
+  }, [resetForNextRecording]);
+
+
+  // (kept for clarity, no longer used as an upload guard)
   const modeRef = React.useRef(mode);
   useEffect(() => { modeRef.current = mode; }, [mode]);
-
 
   const API_BASE = process.env.EXPO_PUBLIC_API_BASE;
 
@@ -90,9 +147,9 @@ export default function RecorderScreen() {
   }, [refreshPerms]);
 
   useEffect(() => {
-    // cleanup if screen unmounts mid-capture/preview
     return () => {
       if (countdownTimer.current) clearInterval(countdownTimer.current);
+      clearCutoffTimers();
       setHidden(false);
       abortedRef.current = true;
       try { camRef.current?.stopRecording?.(); } catch {}
@@ -121,9 +178,7 @@ export default function RecorderScreen() {
     }
   }, [API_BASE, fetchWithAuth, isAuthenticated, leaderboardOptIn, selectedLeaderboardTag]);
 
-  useEffect(() => {
-    loadFollowed();
-  }, [loadFollowed]);
+  useEffect(() => { loadFollowed(); }, [loadFollowed]);
 
   const requestBoth = async () => {
     const c = perm.cam === 'granted' ? camPerm : await requestCam();
@@ -145,28 +200,20 @@ export default function RecorderScreen() {
     return true;
   };
 
-
-
-  const safeJson = (s?: string) => {
-    try { return s ? JSON.parse(s) : null; } catch { return null; }
-  };
-
+  const safeJson = (s?: string) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 
   const doUpload = React.useCallback(async (uri: string) => {
-    if (abortedRef.current || modeRef.current !== 'capture') return;
-    
+    if (abortedRef.current) return;      // only abort guard; don't rely on mode
     setUploading(true);
     try {
-      const nowTopic = String(assignedTopicRef.current || '');  // <- always fresh
+      const nowTopic = String(assignedTopicRef.current || '');
       const nowTag = leaderboardOptIn ? (selectedLeaderboardTag ?? '') : '';
       const filename = uri.split('/').pop() || `mobile_frontFacing_${Date.now()}.mp4`;
       const token = await getValidAccessToken();
       if (!token) throw new Error('Not authenticated');
 
-      // Re-check after any awaits as well
-      if (abortedRef.current || modeRef.current !== 'capture') { setUploading(false); return; }
+      if (abortedRef.current) { setUploading(false); return; }
 
-      // build the text right here to avoid stale closures
       const metadataText =
         [
           `email: ${user?.email ?? ''}`,
@@ -179,37 +226,39 @@ export default function RecorderScreen() {
           `app: comm-mobile`,
         ].join('\n');
 
-
       const res = await FileSystem.uploadAsync(`${API_BASE}/media/mobile_upload_video`, uri, {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'video',
         parameters: {
           filename,
-          metadata: metadataText,            // human-readable file
-          topic: nowTopic,                   // machine field
-          topic_title: nowTopic,             // alt key (some backends use this)
+          metadata: metadataText,
+          topic: nowTopic,
+          topic_title: nowTopic,
           leaderboard_tag: nowTag,
         },
         headers: { Authorization: `Bearer ${token}` },
       });
 
       setUploading(false);
-      if (abortedRef.current || modeRef.current !== 'capture') return;
+      if (abortedRef.current) return;
+
       if (res.status < 200 || res.status >= 300) {
+        // error
         Alert.alert('Upload failed', res.body || `HTTP ${res.status}`);
-        setMode('setup');
+        resetForNextRecording();
         return;
       }
 
       const data = (() => { try { return JSON.parse(res.body); } catch { return null; } })();
+      // success
       Alert.alert('Uploaded!', `Session: ${data?.session_id ?? '—'}\nKey: ${data?.s3_key ?? '—'}`);
-      setMode('setup');
+      resetForNextRecording();
     } catch (e: any) {
       setUploading(false);
       if (abortedRef.current) return;
       Alert.alert('Upload exception', e?.message || String(e));
-      setMode('setup');
+      resetForNextRecording();
     }
   }, [
     API_BASE,
@@ -222,32 +271,6 @@ export default function RecorderScreen() {
 
 
 
-
-
-
-
-  const abortAll = useCallback(() => {
-    // stop preview countdown
-    if (countdownTimer.current) {
-      clearInterval(countdownTimer.current);
-      countdownTimer.current = null;
-    }
-    setCountdown(null);
-
-    // mark flow as cancelled for any awaiting code
-    abortedRef.current = true;
-
-    // stop camera (sync)
-    try {
-      camRef.current?.stopRecording?.();
-    } catch {}
-
-    // reset UI and mode (update ref immediately so guards trigger)
-    setRecording(false);
-    setUploading(false);
-    modeRef.current = 'setup';
-    setMode('setup');
-  }, []);
 
   // Get first topic *title* from the leaderboard's topics JSON via presigned URL
   const fetchFirstTopicFromLeaderboard = useCallback(async (tag: string): Promise<string | null> => {
@@ -270,11 +293,36 @@ export default function RecorderScreen() {
 
   // Start the actual camera recording (no countdown here; preview handled it)
   const startCaptureFlow = React.useCallback(async () => {
+    clearCutoffTimers();
     abortedRef.current = false;
-
+    uploadStartedRef.current = false;
     setRecording(true);
+
+    // --- robust cutoff: tick + watchdog ---
+    const startTs = Date.now();
+
+    // 250ms tick: stop exactly at/just before cutoff even if long timers drift
+    cutoffTickRef.current = setInterval(() => {
+      if (abortedRef.current) return;
+      const elapsed = Date.now() - startTs;
+      if (elapsed >= CAPTURE_CUTOFF_MS - 200) {
+        clearCutoffTimers();
+        forceStopRecording();
+      }
+    }, 250);
+
+    // One-shot watchdog with a tiny grace (for container write/flush jitter)
+    cutoffWatchdogRef.current = setTimeout(() => {
+      if (!abortedRef.current) forceStopRecording();
+    }, CAPTURE_CUTOFF_MS + 750);
+
     try {
-      const vid = await camRef.current?.recordAsync({ maxDuration: 60 });
+      // `maxDuration` is kept as a hint (helps on iOS); manual timers enforce reality
+      const vid = await camRef.current?.recordAsync({
+        maxDuration: Math.ceil(CAPTURE_CUTOFF_MS / 1000),
+      });
+
+      clearCutoffTimers();
       setRecording(false);
 
       if (abortedRef.current) {
@@ -283,10 +331,18 @@ export default function RecorderScreen() {
         return;
       }
 
-      if (!vid?.uri) { Alert.alert('No video captured'); setMode('setup'); return; }
+      if (!vid?.uri) {
+        Alert.alert('No video captured');
+        setMode('setup');
+        return;
+      }
 
-      await doUpload(vid.uri); // <- now the up-to-date doUpload
+      if (!uploadStartedRef.current) {
+        uploadStartedRef.current = true;
+        await doUpload(vid.uri);
+      }
     } catch (e: any) {
+      clearCutoffTimers();
       setRecording(false);
       if (abortedRef.current) return;
       Alert.alert('Recording error', e?.message || String(e));
@@ -324,9 +380,7 @@ export default function RecorderScreen() {
             }}
             granted={granted}
             undetermined={undetermined}
-            onRequestPerms={() => {
-              if (undetermined) requestBoth(); else Linking.openSettings();
-            }}
+            onRequestPerms={() => { if (undetermined) requestBoth(); else Linking.openSettings(); }}
 
             followedBoards={followedBoards}
             selectedLeaderboardTag={selectedLeaderboardTag}
@@ -355,7 +409,7 @@ export default function RecorderScreen() {
                     return;
                   }
                   setAssignedTopic(t);
-                  setTopic(t); // <- title only
+                  setTopic(t); // title only
                 } finally {
                   setPrepping(false);
                 }
@@ -370,20 +424,22 @@ export default function RecorderScreen() {
 
               // Go to preview panel + start countdown
               setMode('preview');
-              setCountdown(10);
+              setCountdown(PREVIEW_SECONDS);
+
               if (countdownTimer.current) clearInterval(countdownTimer.current);
               countdownTimer.current = setInterval(() => {
                 setCountdown((prev) => (prev && prev > 1 ? prev - 1 : null));
               }, 1000);
 
-              // After 10s, switch to capture and record
-              setTimeout(() => {
+              // After PREVIEW_SECONDS, switch to capture and record
+              if (previewKickoffTimer.current) clearTimeout(previewKickoffTimer.current);
+              previewKickoffTimer.current = setTimeout(() => {
                 if (countdownTimer.current) { clearInterval(countdownTimer.current); countdownTimer.current = null; }
                 setCountdown(null);
                 setMode('capture');
                 // small delay to let CameraView mount before record
                 setTimeout(() => startCaptureFlow(), 150);
-              }, 10_000);
+              }, PREVIEW_SECONDS * 1000);
             }}
             readyDisabled={!authReady || !isAuthenticated || prepping}
           />
@@ -404,10 +460,7 @@ export default function RecorderScreen() {
   if (mode === 'calibrate') {
     return (
       <View style={{ flex: 1, backgroundColor: COLORS.black }}>
-        <CameraSetupPanel
-          onDone={() => setMode('setup')}
-          onCancel={() => setMode('setup')}
-        />
+        <CameraSetupPanel onDone={() => setMode('setup')} onCancel={() => setMode('setup')} />
       </View>
     );
   }
@@ -415,16 +468,28 @@ export default function RecorderScreen() {
   // Capture mode (header/footer hidden via UIChromeContext)
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.black }}>
-      <CameraView ref={camRef} style={{ flex: 1 }} facing={CAMERA.FRONT} mode="video" />
+      <CameraView
+        key={cameraKey}
+        ref={camRef}
+        style={{ flex: 1 }}
+        facing={CAMERA.FRONT}
+        mode="video"
+      />
+
       <RecordingOverlay
-        countdown={null}         // countdown happens in preview screen now
+        countdown={null}
         recording={recording}
         uploading={uploading}
         onAbort={abortAll}
       />
+
       {!locked && (
         <View style={styles.bottomBar}>
-          <Button title="Back to Setup" onPress={() => setMode('setup')} color={COLORS.accent} />
+          <Button
+            title="Back to Setup"
+            onPress={() => setMode('setup')}
+            color={COLORS.accent}
+          />
         </View>
       )}
     </View>
