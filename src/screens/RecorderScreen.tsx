@@ -1,9 +1,14 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { View, Button, Alert, Linking, AppState, Platform, ScrollView, StyleSheet } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { View, Button, Alert, Linking, AppState, InteractionManager, Platform, ScrollView, StyleSheet, Modal, Text, TouchableOpacity } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { CameraView, Camera, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system';
+import type {
+  UploadTask,
+  FileSystemUploadOptions,
+} from 'expo-file-system';
 import { CAMERA } from '../native/camera';
+import { useKeepAwake } from 'expo-keep-awake';
 import { useAuth } from '../context/MobileAuthContext';
 import HeaderBar from '../components/HeaderBar';
 import { useUIChrome } from '../context/UIChromeContext';
@@ -31,6 +36,7 @@ const PREVIEW_SECONDS   = 10;         // countdown seconds before recording
 /** ========================================================== */
 
 export default function RecorderScreen() {
+  useKeepAwake();
   const camRef = useRef<CameraView | null>(null);
   const { setHidden } = useUIChrome();
 
@@ -38,6 +44,8 @@ export default function RecorderScreen() {
   const [recording, setRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [showUpload, setShowUpload] = React.useState(false);
+
 
   const [cameraKey, setCameraKey] = useState(0);
 
@@ -48,6 +56,8 @@ export default function RecorderScreen() {
   const cutoffWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cutoffTickRef     = useRef<ReturnType<typeof setInterval> | null>(null);
   const uploadStartedRef  = useRef(false);
+  const progressEmitRef = React.useRef(0);
+
 
   const clearCutoffTimers = () => {
     if (cutoffWatchdogRef.current) { clearTimeout(cutoffWatchdogRef.current); cutoffWatchdogRef.current = null; }
@@ -58,7 +68,8 @@ export default function RecorderScreen() {
     try { camRef.current?.stopRecording?.(); } catch {}
   };
 
-
+  //for restricting navigation during upload
+  const navigation = useNavigation<any>();
 
   const abortedRef = useRef(false);
 
@@ -82,6 +93,9 @@ export default function RecorderScreen() {
   const [selectedLeaderboardTag, setSelectedLeaderboardTag] = useState<string | null>(null);
   const [prepping, setPrepping] = useState(false); // blocks Ready while fetching topic
 
+
+  const [uploadPct, setUploadPct] = React.useState(0);
+  const uploadTaskRef = React.useRef<UploadTask | null>(null);
 
   // 1) Full reset helper (centralized)
   const resetForNextRecording = useCallback(() => {
@@ -109,11 +123,15 @@ export default function RecorderScreen() {
   }, []);
     // 2) Abort — mark aborted, stop recording now, then fully reset
   const abortAll = useCallback(() => {
-    abortedRef.current = true;                 // make in-flight paths bail
+    abortedRef.current = true;
     try { camRef.current?.stopRecording?.(); } catch {}
+    if (uploadTaskRef.current) {
+      uploadTaskRef.current.cancelAsync().catch(() => {});
+    }
+    setUploading(false);
+    setUploadPct(0);
     resetForNextRecording();
   }, [resetForNextRecording]);
-
 
   // (kept for clarity, no longer used as an upload guard)
   const modeRef = React.useRef(mode);
@@ -146,6 +164,7 @@ export default function RecorderScreen() {
     return () => sub.remove();
   }, [refreshPerms]);
 
+  //cleanup
   useEffect(() => {
     return () => {
       if (countdownTimer.current) clearInterval(countdownTimer.current);
@@ -153,8 +172,14 @@ export default function RecorderScreen() {
       setHidden(false);
       abortedRef.current = true;
       try { camRef.current?.stopRecording?.(); } catch {}
+      if (uploadTaskRef.current) {
+        uploadTaskRef.current.cancelAsync().catch(() => {});
+      }
     };
   }, [setHidden]);
+
+
+
 
   // Load followed leaderboards (JWT)
   const loadFollowed = useCallback(async () => {
@@ -203,59 +228,122 @@ export default function RecorderScreen() {
   const safeJson = (s?: string) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 
   const doUpload = React.useCallback(async (uri: string) => {
-    if (abortedRef.current) return;      // only abort guard; don't rely on mode
+    if (abortedRef.current) return;
+
     setUploading(true);
+    setUploadPct(0);
+
     try {
       const nowTopic = String(assignedTopicRef.current || '');
       const nowTag = leaderboardOptIn ? (selectedLeaderboardTag ?? '') : '';
-      const filename = uri.split('/').pop() || `mobile_frontFacing_${Date.now()}.mp4`;
+
+      const metadataText = [
+        `email: ${user?.email ?? ''}`,
+        `datetime_iso: ${new Date().toISOString()}`,
+        `topic: ${nowTopic}`,
+        `organization: ${organization}`,
+        `leaderboard_opt_in: ${leaderboardOptIn ? 'true' : 'false'}`,
+        `leaderboard_tag: ${nowTag}`,
+        `platform: ${Platform.OS} ${Platform.Version}`,
+        `app: comm-mobile`,
+      ].join('\n');
+
       const token = await getValidAccessToken();
       if (!token) throw new Error('Not authenticated');
 
-      if (abortedRef.current) { setUploading(false); return; }
-
-      const metadataText =
-        [
-          `email: ${user?.email ?? ''}`,
-          `datetime_iso: ${new Date().toISOString()}`,
-          `topic: ${nowTopic}`,
-          `organization: ${organization}`,
-          `leaderboard_opt_in: ${leaderboardOptIn ? 'true' : 'false'}`,
-          `leaderboard_tag: ${nowTag}`,
-          `platform: ${Platform.OS} ${Platform.Version}`,
-          `app: comm-mobile`,
-        ].join('\n');
-
-      const res = await FileSystem.uploadAsync(`${API_BASE}/media/mobile_upload_video`, uri, {
-        httpMethod: 'POST',
-        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName: 'video',
-        parameters: {
-          filename,
-          metadata: metadataText,
-          topic: nowTopic,
-          topic_title: nowTopic,
-          leaderboard_tag: nowTag,
-        },
+      // 1) presigns
+      const createRes = await fetch(`${API_BASE}/media/mobile_create_session`, {
+        method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!createRes.ok) {
+        const txt = await createRes.text().catch(() => '');
+        throw new Error(`create_session ${createRes.status}: ${txt || 'failed'}`);
+      }
+      const { session_id, video_post, metadata_put_url } = await createRes.json();
 
-      setUploading(false);
-      if (abortedRef.current) return;
+      if (abortedRef.current) { setUploading(false); return; }
 
-      if (res.status < 200 || res.status >= 300) {
-        // error
-        Alert.alert('Upload failed', res.body || `HTTP ${res.status}`);
-        resetForNextRecording();
-        return;
+      // 2) metadata.txt (SSE header required to match presign)
+      const metaRes = await fetch(metadata_put_url, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'x-amz-server-side-encryption': 'AES256',
+        },
+        body: metadataText,
+      });
+      if (!metaRes.ok) {
+        const txt = await metaRes.text().catch(() => '');
+        throw new Error(`metadata PUT ${metaRes.status}: ${txt || 'failed'}`);
       }
 
-      const data = (() => { try { return JSON.parse(res.body); } catch { return null; } })();
-      // success
-      Alert.alert('Uploaded!', `Session: ${data?.session_id ?? '—'}\nKey: ${data?.s3_key ?? '—'}`);
-      resetForNextRecording();
-    } catch (e: any) {
+      if (abortedRef.current) { setUploading(false); return; }
+
+
+
+
+    // get local size once
+    let localSize: number | undefined;
+    try {
+      const info = await FileSystem.getInfoAsync(uri);
+      // @ts-ignore size exists at runtime
+      if (info?.exists && typeof (info as any).size === 'number') {
+        localSize = (info as any).size as number;
+      }
+    } catch {}
+
+    const onProgress = (p: { totalBytesSent: number; totalBytesExpectedToSend: number }) => {
+      const expected = p.totalBytesExpectedToSend > 0 ? p.totalBytesExpectedToSend : (localSize ?? -1);
+      const pct = expected > 0 ? p.totalBytesSent / expected : 0;
+
+      const now = Date.now();
+      if (now - progressEmitRef.current > 100) {
+        progressEmitRef.current = now;
+        setUploadPct(pct);
+      }
+    };
+
+
+      const options: FileSystemUploadOptions = {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'file',
+        parameters: video_post.fields as Record<string, string>, // all presign fields
+      };
+
+      setUploadPct(0);
+      progressEmitRef.current = 0;
+      setShowUpload(true);
+
+      // create one task, await it so the modal stays up
+      const task = FileSystem.createUploadTask(video_post.url, uri, options, onProgress);
+      uploadTaskRef.current = task;
+
+      const res = await task.uploadAsync();
+      uploadTaskRef.current = null;
+
+      if (!res || res.status < 200 || res.status >= 300) {
+        throw new Error(`S3 POST ${res?.status}: ${res?.body?.slice(0, 200) || ''}`);
+      }
+
+
+
+      // after `res` is 2xx
+      setShowUpload(false);
       setUploading(false);
+      setUploadPct(1);
+      resetForNextRecording();
+
+      // show alert after UI settles
+      InteractionManager.runAfterInteractions(() => {
+        Alert.alert('Uploaded!', `Session: ${session_id}\nProcessing will start shortly.`);
+      });
+    } catch (e: any) {
+      uploadTaskRef.current = null;
+      setShowUpload(false);
+      setUploading(false);
+      setUploadPct(0);
       if (abortedRef.current) return;
       Alert.alert('Upload exception', e?.message || String(e));
       resetForNextRecording();
@@ -267,9 +355,8 @@ export default function RecorderScreen() {
     organization,
     leaderboardOptIn,
     selectedLeaderboardTag,
+    resetForNextRecording,
   ]);
-
-
 
 
   // Get first topic *title* from the leaderboard's topics JSON via presigned URL
@@ -351,14 +438,50 @@ export default function RecorderScreen() {
   }, [doUpload]);
 
 
+
+  //Upload modal progress bar (move to ind file LATER)
+  function UploadProgressModal({
+    visible,
+    pct,
+    onCancel,
+  }: { visible: boolean; pct: number; onCancel: () => void }) {
+    const percent = Math.max(0, Math.min(100, Math.round(pct * 100)));
+    return (
+      <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={onCancel}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 }}>
+          <View style={{ backgroundColor: '#111', borderRadius: 14, padding: 20 }}>
+            <Text style={{ color: 'white', fontSize: 18, fontWeight: '600', marginBottom: 10 }}>
+              Uploading your session…
+            </Text>
+
+            <View style={{ height: 10, backgroundColor: '#2a2a2a', borderRadius: 5, overflow: 'hidden' }}>
+              <View style={{ height: 10, width: `${percent}%`, backgroundColor: '#6aa7ff' }} />
+            </View>
+
+            <Text style={{ color: '#bbb', marginTop: 8 }}>{percent}%</Text>
+
+            <TouchableOpacity onPress={onCancel} style={{ marginTop: 14, alignSelf: 'flex-end' }}>
+              <Text style={{ color: '#ff8888' }}>Cancel upload</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
+
+
+
   // derived UI state
   const granted = perm.cam === 'granted' && perm.mic === 'granted';
   const undetermined = perm.cam === 'undetermined' || perm.mic === 'undetermined';
   const locked = countdown !== null || recording || uploading;
 
-  // Setup mode
+  // ---------- RENDER ----------
+  let content: React.ReactElement | null = null;
+
   if (mode === 'setup') {
-    return (
+    content = (
       <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
         <HeaderBar
           title="Record"
@@ -446,54 +569,58 @@ export default function RecorderScreen() {
         </ScrollView>
       </View>
     );
-  }
-
-  // Preview mode (topic + countdown; no camera yet)
-  if (mode === 'preview') {
-    return (
+  } else if (mode === 'preview') {
+    content = (
       <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
         <TopicCountdownPanel topic={assignedTopic || 'Free topic'} countdown={countdown} onAbort={abortAll} />
       </View>
     );
-  }
-
-  if (mode === 'calibrate') {
-    return (
+  } else if (mode === 'calibrate') {
+    content = (
       <View style={{ flex: 1, backgroundColor: COLORS.black }}>
         <CameraSetupPanel onDone={() => setMode('setup')} onCancel={() => setMode('setup')} />
       </View>
     );
+  } else {
+    // capture
+    content = (
+      <View style={{ flex: 1, backgroundColor: COLORS.black }}>
+        <CameraView
+          key={cameraKey}
+          ref={camRef}
+          style={{ flex: 1 }}
+          facing={CAMERA.FRONT}
+          mode="video"
+        />
+
+        {/* Do not show uploading spinner here; the modal below owns that UI */}
+        <RecordingOverlay
+          countdown={null}
+          recording={recording}
+          uploading={false}
+          onAbort={abortAll}
+        />
+
+        {!locked && (
+          <View style={styles.bottomBar}>
+            <Button
+              title="Back to Setup"
+              onPress={() => setMode('setup')}
+              color={COLORS.accent}
+            />
+          </View>
+        )}
+      </View>
+    );
   }
 
-  // Capture mode (header/footer hidden via UIChromeContext)
   return (
-    <View style={{ flex: 1, backgroundColor: COLORS.black }}>
-      <CameraView
-        key={cameraKey}
-        ref={camRef}
-        style={{ flex: 1 }}
-        facing={CAMERA.FRONT}
-        mode="video"
-      />
-
-      <RecordingOverlay
-        countdown={null}
-        recording={recording}
-        uploading={uploading}
-        onAbort={abortAll}
-      />
-
-      {!locked && (
-        <View style={styles.bottomBar}>
-          <Button
-            title="Back to Setup"
-            onPress={() => setMode('setup')}
-            color={COLORS.accent}
-          />
-        </View>
-      )}
+    <View style={{ flex: 1 }}>
+      {content}
+      <UploadProgressModal visible={showUpload} pct={uploadPct} onCancel={abortAll} />
     </View>
   );
+
 }
 
 const styles = StyleSheet.create({

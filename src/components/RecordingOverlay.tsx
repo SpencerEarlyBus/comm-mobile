@@ -10,7 +10,7 @@ type Props = {
 };
 
 export default function RecordingOverlay({ countdown, recording, uploading, onAbort }: Props) {
-  const locked = countdown !== null || recording || uploading;
+  const locked = countdown !== null || recording; 
 
   if (!locked) return null;
 
