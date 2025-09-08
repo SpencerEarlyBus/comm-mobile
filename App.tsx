@@ -17,8 +17,13 @@ import AuthedRecorderScreen from './src/screens/AuthedRecorderScreen';
 import LeaderboardScreen from './src/screens/LeaderboardScreen';
 import TopicsTodayScreen from './src/screens/TopicsTodayScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+import CaptureScreen from './src/screens/CaptureScreen';
 
-const Stack = createNativeStackNavigator();
+
+import type { RootStackParamList } from './src/navigation/navRef';     
+
+const Stack = createNativeStackNavigator<RootStackParamList>();        
+
 const qc = new QueryClient();
 
 export default function App() {
@@ -43,6 +48,16 @@ export default function App() {
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Leaderboard" component={LeaderboardScreen} />    
                 <Stack.Screen name="TopicsToday" component={TopicsTodayScreen} />     
+                <Stack.Screen
+                    name="Capture"
+                    component={CaptureScreen}
+                    options={{
+                      headerShown: false,
+                      presentation: 'card',
+                      animation: 'slide_from_right',
+                      contentStyle: { backgroundColor: 'black' },
+                    }}
+                  />
               </Stack.Navigator>
 
               {/* Persistent footer (no hooks) */}
