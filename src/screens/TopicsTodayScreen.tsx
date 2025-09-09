@@ -9,11 +9,19 @@ import {
   Pressable,
   RefreshControl,
   Alert,
+  Dimensions,
 } from 'react-native';
 import HeaderBar from '../components/HeaderBar';
 import { COLORS } from '../theme/colors';
 import LeaderboardCard, { LeaderboardItem } from '../components/LeaderboardCard';
 import { useAuth } from '../context/MobileAuthContext';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  runOnJS,
+} from 'react-native-reanimated';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://your.backend.root';
 
@@ -24,6 +32,14 @@ type ListResponse = {
   offset: number;
   items: LeaderboardItem[];
 };
+
+type Scope = 'public' | 'accessible' | 'followed';
+
+const DRAWER_WIDTH = 280;
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const HEADER_H = 56; // keep in sync with your <HeaderBar/> visual height
+
+const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
 export default function ExploreLeaderboardsScreen({ navigation }: any) {
   const { isAuthenticated, fetchWithAuth } = useAuth() as any;
@@ -37,9 +53,27 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
   const [total, setTotal] = useState(0);
   const limit = 20;
 
+  const [scope, setScope] = useState<Scope>('public');
+
+  // Drawer state
+  const drawerX = useSharedValue(-DRAWER_WIDTH);
+  const dragStartX = useSharedValue(0);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const openDrawer = useCallback(() => {
+    setDrawerOpen(true);
+    drawerX.value = withTiming(0, { duration: 220 });
+  }, [drawerX]);
+
+  const closeDrawer = useCallback(() => {
+    drawerX.value = withTiming(-DRAWER_WIDTH, { duration: 200 }, (finished) => {
+      if (finished) runOnJS(setDrawerOpen)(false);
+    });
+  }, [drawerX]);
+
+  // Data
   const canLoadMore = items.length < total;
 
-  // ---- Load user's followed leaderboards
   const loadFollows = useCallback(async () => {
     if (!isAuthenticated) {
       setFollowed(new Set());
@@ -51,25 +85,24 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
       const data = await res.json();
       const tags: string[] = data?.tags || [];
       setFollowed(new Set(tags));
-    } catch {
-      // ignore; keep current state
-    }
+    } catch {}
   }, [fetchWithAuth, isAuthenticated]);
 
-  // ---- Fetch leaderboard page
   const fetchPage = useCallback(
     async (opts?: { reset?: boolean }) => {
       const nextOffset = opts?.reset ? 0 : offset;
       const url = new URL(`${API_BASE}/mobile/leaderboards`);
-      url.searchParams.set('visibility', 'public');
+      url.searchParams.set('scope', scope);
       url.searchParams.set('is_active', 'true');
-      url.searchParams.set('sort', 'updated'); // surface recent/active
+      url.searchParams.set('sort', 'updated');
       url.searchParams.set('order', 'desc');
       url.searchParams.set('limit', String(limit));
       url.searchParams.set('offset', String(nextOffset));
       if (query.trim()) url.searchParams.set('q', query.trim());
 
-      const res = await fetch(url.toString());
+      const run = scope === 'public' ? fetch : fetchWithAuth;
+
+      const res = await run(url.toString());
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as ListResponse;
 
@@ -82,16 +115,14 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
       }
       setTotal(data.total || 0);
     },
-    [query, offset]
+    [query, offset, scope, fetchWithAuth]
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       await Promise.all([fetchPage({ reset: true }), loadFollows()]);
-    } catch {
-      // consider toast
-    } finally {
+    } catch {} finally {
       setRefreshing(false);
     }
   }, [fetchPage, loadFollows]);
@@ -105,16 +136,60 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
     }
   }, [fetchPage]);
 
-  // initial load & when auth state changes
   useEffect(() => {
     runSearch();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     loadFollows();
   }, [loadFollows]);
 
-  // ---- Follow / Unfollow (optimistic)
+  // Gestures (horizontal only, below header)
+  const edgeSwipe = Gesture.Pan()
+    .activeOffsetX([-14, 14]) // require meaningful horizontal move
+    .failOffsetY([-12, 12])   // fail if vertical motion grows
+    .onStart((e) => {
+      const fromLeftEdge = e.absoluteX < 20;
+      const belowHeader = e.absoluteY > HEADER_H;
+      if (!drawerOpen && !(fromLeftEdge && belowHeader)) return;
+      dragStartX.value = drawerX.value;
+    })
+    .onUpdate((e) => {
+      const nextX = clamp(dragStartX.value + e.translationX, -DRAWER_WIDTH, 0);
+      drawerX.value = nextX;
+    })
+    .onEnd((_e) => {
+      const shouldOpen = drawerX.value > -DRAWER_WIDTH * 0.6;
+      if (shouldOpen) runOnJS(openDrawer)();
+      else runOnJS(closeDrawer)();
+    });
+
+  const drawerDrag = Gesture.Pan()
+    .activeOffsetX([-14, 14])
+    .failOffsetY([-12, 12])
+    .onStart((_e) => {
+      dragStartX.value = drawerX.value;
+    })
+    .onUpdate((e) => {
+      const nextX = clamp(dragStartX.value + e.translationX, -DRAWER_WIDTH, 0);
+      drawerX.value = nextX;
+    })
+    .onEnd((_e) => {
+      const shouldOpen = drawerX.value > -DRAWER_WIDTH * 0.6;
+      if (shouldOpen) runOnJS(openDrawer)();
+      else runOnJS(closeDrawer)();
+    });
+
+  const drawerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: drawerX.value }],
+  }));
+
+  const overlayStyle = useAnimatedStyle(() => {
+    const openAmt = 1 - Math.max(0, Math.min(1, Math.abs(drawerX.value) / DRAWER_WIDTH));
+    return { opacity: withTiming(openAmt * 0.5, { duration: 120 }) };
+  });
+
   const toggleFollow = useCallback(
     async (it: LeaderboardItem) => {
       if (!isAuthenticated) {
@@ -124,7 +199,6 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
       const tag = it.tag;
       const currentlyFollowing = followed.has(tag);
 
-      // optimistic flip
       setFollowed((prev) => {
         const next = new Set(prev);
         if (currentlyFollowing) next.delete(tag);
@@ -180,106 +254,171 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
     <View style={styles.container}>
       <HeaderBar title="Explore" dark onPressNotifications={() => {}} onPressStatus={() => {}} />
 
-      {/* Plain View to avoid extra top padding; sticky header will sit flush under HeaderBar */}
-      <View style={styles.screen}>
-        {loading && items.length === 0 ? (
-          <View style={styles.loadingBox}>
-            <ActivityIndicator />
-            <Text style={styles.loadingText}>Loading leaderboards…</Text>
-          </View>
-        ) : (
-          <FlatList
-            data={items}
-            keyExtractor={keyExtractor}
-            renderItem={renderItem}
-            style={styles.list}
-            contentContainerStyle={styles.listContent}
-            ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-            keyboardShouldPersistTaps="handled"
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.text} />}
+      {/* Edge swipe applies only to content below the header */}
+      <GestureDetector gesture={edgeSwipe}>
+        <View style={styles.screen}>
+          {loading && items.length === 0 ? (
+            <View style={styles.loadingBox}>
+              <ActivityIndicator />
+              <Text style={styles.loadingText}>Loading leaderboards…</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={items}
+              keyExtractor={keyExtractor}
+              renderItem={renderItem}
+              style={styles.list}
+              contentContainerStyle={styles.listContent}
+              ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+              keyboardShouldPersistTaps="handled"
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.text} />
+              }
+              stickyHeaderIndices={[0]}
+              contentInsetAdjustmentBehavior="never"
+              ListHeaderComponent={
+                <View style={styles.stickySearch}>
+                  <View style={styles.searchRow}>
+                    <Pressable
+                      onPress={openDrawer}
+                      style={({ pressed }) => [styles.menuBtn, pressed && { opacity: 0.8 }]}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Open categories menu"
+                    >
+                      <Text style={styles.menuBtnText}>☰</Text>
+                    </Pressable>
 
-            // keep search locked under header
-            stickyHeaderIndices={[0]}
-            contentInsetAdjustmentBehavior="never"
-            ListHeaderComponent={
-              <View style={styles.stickySearch}>
-                {/* full-bleed row (no horizontal padding) */}
-                <View style={styles.searchRow}>
-                  <TextInput
-                    placeholder="Search leaderboards…"
-                    placeholderTextColor={COLORS.label}
-                    value={query}
-                    onChangeText={setQuery}
-                    style={styles.search}
-                    returnKeyType="search"
-                    onSubmitEditing={runSearch}
-                  />
-                  <Pressable
-                    onPress={runSearch}
-                    style={({ pressed }) => [styles.searchBtn, pressed && { opacity: 0.92 }]}
-                  >
-                    <Text style={styles.searchBtnText}>Search</Text>
-                  </Pressable>
+                    <TextInput
+                      placeholder="Search leaderboards…"
+                      placeholderTextColor={COLORS.label}
+                      value={query}
+                      onChangeText={setQuery}
+                      style={styles.search}
+                      returnKeyType="search"
+                      onSubmitEditing={runSearch}
+                    />
+                    <Pressable
+                      onPress={runSearch}
+                      style={({ pressed }) => [styles.searchBtn, pressed && { opacity: 0.92 }]}
+                    >
+                      <Text style={styles.searchBtnText}>Search</Text>
+                    </Pressable>
+                  </View>
                 </View>
-              </View>
-            }
-            ListEmptyComponent={
-              <View style={styles.emptyBox}>
-                <Text style={styles.emptyTitle}>No leaderboards yet</Text>
-                <Text style={styles.emptySub}>Try a different search or check back soon.</Text>
-              </View>
-            }
-            ListFooterComponent={
-              canLoadMore ? (
-                <Pressable
-                  onPress={() => fetchPage()}
-                  style={({ pressed }) => [styles.loadMore, pressed && { opacity: 0.96 }]}
-                >
-                  <Text style={styles.loadMoreText}>Load more</Text>
-                </Pressable>
-              ) : items.length > 0 ? (
-                <Text style={styles.endText}>No more leaderboards to show</Text>
-              ) : null
-            }
-          />
-        )}
-      </View>
+              }
+              ListEmptyComponent={
+                <View style={styles.emptyBox}>
+                  <Text style={styles.emptyTitle}>No leaderboards yet</Text>
+                  <Text style={styles.emptySub}>Try a different search or check back soon.</Text>
+                </View>
+              }
+              ListFooterComponent={
+                canLoadMore ? (
+                  <Pressable
+                    onPress={() => fetchPage()}
+                    style={({ pressed }) => [styles.loadMore, pressed && { opacity: 0.96 }]}
+                  >
+                    <Text style={styles.loadMoreText}>Load more</Text>
+                  </Pressable>
+                ) : items.length > 0 ? (
+                  <Text style={styles.endText}>No more leaderboards to show</Text>
+                ) : null
+              }
+            />
+          )}
+        </View>
+      </GestureDetector>
+
+      {/* OVERLAY, below header only */}
+      {drawerOpen && (
+        <Pressable
+          onPress={closeDrawer}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="auto"
+          accessibilityRole="button"
+          accessibilityLabel="Close categories menu"
+        >
+          <Animated.View style={[styles.overlay, overlayStyle]} />
+        </Pressable>
+      )}
+
+      {/* DRAWER, below header only */}
+      <GestureDetector gesture={drawerDrag}>
+        <Animated.View style={[styles.drawer, drawerStyle]}>
+          <Text style={styles.drawerTitle}>Active Leaderboards</Text>
+
+          <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
+            <Text style={styles.catText}>Current Events</Text>
+          </Pressable>
+          <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
+            <Text style={styles.catText}>History</Text>
+          </Pressable>
+          <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
+            <Text style={styles.catText}>Math</Text>
+          </Pressable>
+          <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
+            <Text style={styles.catText}>Sales/Pitching</Text>
+          </Pressable>
+          <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
+            <Text style={styles.catText}>Augmented Leaderboards</Text>
+          </Pressable>
+          <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
+            <Text style={styles.catText}>Private Leaderboards</Text>
+          </Pressable>
+
+          <View style={{ height: 14 }} />
+          <Pressable onPress={closeDrawer} style={styles.closeBtn}>
+            <Text style={styles.closeBtnText}>Close</Text>
+          </Pressable>
+        </Animated.View>
+      </GestureDetector>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  screen: { flex: 1 }, // list sits directly under HeaderBar
+  screen: { flex: 1 },
   list: { flex: 1 },
   listContent: {
-    paddingHorizontal: 20, // list items have 20px inset
-    paddingBottom: 40, // small; device insets handled elsewhere
+    paddingHorizontal: 20,
+    paddingBottom: 40,
     gap: 12,
   },
 
-  // Full-bleed sticky bar directly under HeaderBar (no extra top padding)
   stickySearch: {
     backgroundColor: COLORS.bg,
     zIndex: 10,
     borderBottomColor: COLORS.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    // optional separation
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
   },
-  // no padding here → truly edge-to-edge
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  // controls get their own margins so header stays full-bleed
+  menuBtn: {
+    marginLeft: 12,
+    marginRight: 8,
+    height: 40,
+    minWidth: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+  },
+  menuBtnText: { color: COLORS.text, fontSize: 18, fontWeight: '800' },
+
   search: {
     flex: 1,
-    marginLeft: 20, // visual inset
+    marginLeft: 8,
     marginVertical: 8,
     backgroundColor: COLORS.card,
     borderColor: COLORS.border,
@@ -290,7 +429,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   searchBtn: {
-    marginRight: 20, // visual inset
+    marginRight: 20,
     marginLeft: 8,
     backgroundColor: COLORS.accent,
     paddingHorizontal: 14,
@@ -318,4 +457,53 @@ const styles = StyleSheet.create({
   },
   loadMoreText: { color: COLORS.text, fontWeight: '700' },
   endText: { color: COLORS.label, textAlign: 'center', marginTop: 14 },
+
+  // Overlay below header
+  overlay: {
+    position: 'absolute',
+    top: HEADER_H,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#000',
+  },
+
+  // Drawer below header
+  drawer: {
+    position: 'absolute',
+    top: HEADER_H,
+    bottom: 0,
+    left: 0,
+    width: DRAWER_WIDTH,
+    backgroundColor: COLORS.bg,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: COLORS.border,
+    paddingTop: 12,
+    paddingHorizontal: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 2, height: 0 },
+    elevation: 6,
+  },
+  drawerTitle: { color: COLORS.text, fontSize: 18, fontWeight: '800', marginVertical: 8 },
+  catItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginTop: 8,
+  },
+  catText: { color: COLORS.text, fontWeight: '700' },
+  closeBtn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: COLORS.accent,
+    marginTop: 8,
+  },
+  closeBtnText: { color: COLORS.white, fontWeight: '800' },
 });
