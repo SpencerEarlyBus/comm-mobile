@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ActivityIndicator, Pressable, Linking, StyleSheet } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
+import { usePresignedAnnotatedUrl } from '../hooks/usePresignedAnnotatedUrl';
 import { usePresignedVideoUrl } from '../hooks/usePresignedVideoUrl';
 import { useSessionBodyText } from '../hooks/useSessionBodyText';
 import { PanelProps } from './Panel.types';
@@ -37,7 +38,7 @@ function parsePostureText(txt?: string): PostureParsed {
 }
 
 const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
-  // 1) Posture text (from body_txt)
+  // 1) Posture text (unchanged)
   const {
     text: bodyText,
     isLoading: bodyLoading,
@@ -45,10 +46,9 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
     error: bodyError,
     refetch: refetchBody,
   } = useSessionBodyText(sessionId, true);
-
   const parsed = useMemo(() => parsePostureText(bodyText), [bodyText]);
 
-  // 2) Video — fetch presign only when the box is opened
+  // 2) Plain Session Video (unchanged logic)
   const {
     data: url,
     isLoading: presignLoading,
@@ -56,14 +56,12 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
     error: presignError,
     refetch: refetchVideo,
   } = usePresignedVideoUrl(sessionId, false);
-
   const [videoOpen, setVideoOpen] = useState(false);
 
   useEffect(() => {
-    if (videoOpen) refetchVideo(); // ask backend for a fresh presigned URL on expand
+    if (videoOpen) refetchVideo();
   }, [videoOpen, refetchVideo]);
 
-  // Attach player only when we *have* a URL and the box is open
   const player = useVideoPlayer('', (p) => {
     p.loop = false;
     p.timeUpdateEventInterval = 0.25;
@@ -80,7 +78,6 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
     return () => sub.remove();
   }, [player]);
 
-  // Clean up player on unmount
   useEffect(() => {
     return () => {
       (async () => {
@@ -90,7 +87,6 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
     };
   }, [player]);
 
-  // When (open && url) attach player
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -106,9 +102,67 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
   const retryText = useCallback(() => refetchBody(), [refetchBody]);
   const retryVideo = useCallback(() => { setLoadError(null); refetchVideo(); }, [refetchVideo]);
 
+  // 3) Annotated Session Video (NEW)
+  const {
+    data: annotatedUrl,
+    isLoading: annotatedLoading,
+    isError: annotatedErr,
+    error: annotatedError,
+    refetch: refetchAnnotated,
+  } = usePresignedAnnotatedUrl(sessionId, false);
+
+  const [annotatedOpen, setAnnotatedOpen] = useState(false);
+
+  useEffect(() => {
+    if (annotatedOpen) refetchAnnotated(); // fetch fresh presign when opened
+  }, [annotatedOpen, refetchAnnotated]);
+
+  // Separate player for annotated video
+  const annotatedPlayer = useVideoPlayer('', (p) => {
+    p.loop = false;
+    p.timeUpdateEventInterval = 0.25;
+  });
+  const [annotatedReady, setAnnotatedReady] = useState(false);
+  const [annotatedLoadingPlayer, setAnnotatedLoadingPlayer] = useState(false);
+  const [annotatedLoadErr, setAnnotatedLoadErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    const sub = annotatedPlayer.addListener('statusChange', ({ status, error }: any) => {
+      if (status === 'readyToPlay') setAnnotatedReady(true);
+      if (status === 'error') setAnnotatedLoadErr(errorMsg(error ?? 'Playback error'));
+    });
+    return () => sub.remove();
+  }, [annotatedPlayer]);
+
+  useEffect(() => {
+    return () => {
+      (async () => {
+        try { await annotatedPlayer.pause(); } catch {}
+        try { await annotatedPlayer.replaceAsync(''); } catch {}
+      })();
+    };
+  }, [annotatedPlayer]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!annotatedOpen || !annotatedUrl) return;
+      setAnnotatedReady(false); setAnnotatedLoadErr(null); setAnnotatedLoadingPlayer(true);
+      try { await annotatedPlayer.replaceAsync({ uri: annotatedUrl }); }
+      catch (e) { if (!cancelled) setAnnotatedLoadErr(errorMsg(e)); }
+      finally { if (!cancelled) setAnnotatedLoadingPlayer(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [annotatedOpen, annotatedUrl, annotatedPlayer]);
+
+  const retryAnnotated = useCallback(() => {
+    setAnnotatedLoadErr(null);
+    refetchAnnotated();
+  }, [refetchAnnotated]);
+
   return (
     <View style={{ marginHorizontal: 16, marginTop: 10 }}>
-      {/* Posture — Overview (optional explanatory copy) */}
+      {/* Overview */}
       <CollapsibleBox
         title="Posture — Overview"
         initiallyCollapsed
@@ -122,7 +176,7 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
         </Text>
       </CollapsibleBox>
 
-      {/* Posture — Stats */}
+      {/* Analysis */}
       <CollapsibleBox
         title="Posture Analysis"
         initiallyCollapsed={false}
@@ -149,7 +203,6 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
             {!!parsed.frames && (
               <Text style={styles.dim}>Frames analyzed: {parsed.frames.toLocaleString()}</Text>
             )}
-
             <View style={{ gap: 4 }}>
               <Text style={styles.line}>
                 <Text style={styles.k}>Open posture:</Text>{' '}
@@ -174,7 +227,7 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
         )}
       </CollapsibleBox>
 
-      {/* Session Video — collapsed by default; loads ONLY when expanded */}
+      {/* Session Video */}
       <CollapsibleBox
         title="Session Video"
         initiallyCollapsed
@@ -199,7 +252,7 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
           </View>
         ) : !url ? (
           <Text style={styles.emptyText}>No video available.</Text>
-        ) : ( // we have a URL
+        ) : (
           <>
             {(loadingVideo || !ready) ? (
               <View style={styles.centerBox}>
@@ -226,6 +279,64 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
                 style={[styles.retryBtn, { backgroundColor: '#334155' }]}
               >
                 <Text style={styles.retryText}>Open in Browser</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
+      </CollapsibleBox>
+
+      {/* Annotated Session Video (NEW) */}
+      <CollapsibleBox
+        title="Annotated Session Video"
+        initiallyCollapsed
+        backgroundColor={C.black}
+        borderColor={C.border}
+        headerTint={C.text}
+        onToggle={setAnnotatedOpen}
+      >
+        {!annotatedOpen ? (
+          <Text style={styles.dim}>Expand to load the annotated video.</Text>
+        ) : annotatedLoading ? (
+          <View style={styles.centerBox}>
+            <ActivityIndicator />
+            <Text style={styles.loadingText}>Fetching annotated link…</Text>
+          </View>
+        ) : annotatedErr ? (
+          <View style={{ rowGap: 8 }}>
+            <Text style={styles.errText}>Couldn’t get annotated URL: {errorMsg(annotatedError)}</Text>
+            <Pressable onPress={retryAnnotated} style={styles.retryBtn}>
+              <Text style={styles.retryText}>Refresh Link</Text>
+            </Pressable>
+          </View>
+        ) : !annotatedUrl ? (
+          <Text style={styles.emptyText}>No annotated video available.</Text>
+        ) : (
+          <>
+            {(annotatedLoadingPlayer || !annotatedReady) ? (
+              <View style={styles.centerBox}>
+                <ActivityIndicator />
+                <Text style={styles.loadingText}>Loading annotated video…</Text>
+              </View>
+            ) : null}
+
+            {annotatedReady && !annotatedLoadingPlayer && (
+              <VideoView
+                key={annotatedUrl}
+                player={annotatedPlayer}
+                style={{ width: '100%', aspectRatio: 9 / 16 }}
+                nativeControls
+                allowsFullscreen
+                allowsPictureInPicture
+                contentFit="contain"
+              />
+            )}
+
+            <View style={{ marginTop: 8 }}>
+              <Pressable
+                onPress={() => Linking.openURL(annotatedUrl)}
+                style={[styles.retryBtn, { backgroundColor: '#334155' }]}
+              >
+                <Text style={styles.retryText}>Open Annotated in Browser</Text>
               </Pressable>
             </View>
           </>

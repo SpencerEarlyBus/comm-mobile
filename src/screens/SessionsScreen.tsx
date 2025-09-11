@@ -263,36 +263,35 @@ export default function SessionsScreen() {
       const txt = await res.text().catch(() => '');
       throw new Error(`Failed to load sessions: ${res.status} ${txt}`);
     }
-    return res.json();
+    const j = await res.json();
+
+    // tolerate both old (array) and new ({items}) shapes
+    const items = Array.isArray(j) ? j : j?.items;
+    return Array.isArray(items) ? items : [];
   }, [fetchWithAuth]);
 
   const { data, isFetching, refetch } = useQuery({
     queryKey: ['mobile-sessions', 'list'],
     queryFn: fetchSessions,
 
-    // v5: only boolean | "always"
     refetchOnMount: true,
     refetchOnWindowFocus: true,
-
-    // keep results fresh for a while
     staleTime: 30_000,
     gcTime: 600_000,
-
-    // only run when this screen is focused
     enabled: isFocused,
 
-    // v5: function arg is the query object; read from query.state.data
+    // v5: query arg is the query object; read from query.state.data
     refetchInterval: (query) => {
-      const rows = (query.state.data as MobileSession[] | undefined) ?? [];
-      const active = rows.some(
-        (s) => s.status === 'queued' || s.status === 'processing'
-      );
+      const rowsMaybe = query.state.data as unknown;
+      const rows = Array.isArray(rowsMaybe) ? rowsMaybe as MobileSession[] : [];
+      const active = rows.some((s) => s.status === 'queued' || s.status === 'processing');
       return active ? 5000 : false;
     },
 
     // trim payload to what you render
-    select: (rows: MobileSession[]) =>
-      rows.map((r) => ({
+    select: (rowsMaybe: unknown) => {
+      const rows = Array.isArray(rowsMaybe) ? (rowsMaybe as MobileSession[]) : [];
+      return rows.map((r) => ({
         id: r.id,
         topic: r.topic,
         status: r.status,
@@ -300,7 +299,8 @@ export default function SessionsScreen() {
         leaderboard_tag: r.leaderboard_tag,
         overall_score: r.overall_score,
         scores_json: r.scores_json,
-      })),
+      }));
+    },
   });
 
   const sourceSession = useMemo(() => {
@@ -310,11 +310,11 @@ export default function SessionsScreen() {
     const completed = sessions.find(s => s.status === 'completed');
     return completed ?? sessions[0];
   }, [data, selectedSessionId]);
-  const hasSessions = (data?.length ?? 0) > 0;
+  const hasSessions = (Array.isArray(data) ? data.length : 0) > 0;
 
 
   const anyInFlight = useMemo(
-    () => (data ?? []).some(s => s.status === 'queued' || s.status === 'processing'),
+    () => (Array.isArray(data) ? data : []).some(s => s.status === 'queued' || s.status === 'processing'),
     [data]
   );
 
@@ -440,7 +440,8 @@ export default function SessionsScreen() {
 
       <SessionPickerModal
         visible={pickerOpen}
-        items={(data ?? []) as any}
+        serverDriven   
+        items={(data ?? []) as any}  // still passed for graceful fallback
         currentId={sourceSession?.id}
         onClose={() => setPickerOpen(false)}
         onSelect={(id) => setSelectedSessionId(id)}
