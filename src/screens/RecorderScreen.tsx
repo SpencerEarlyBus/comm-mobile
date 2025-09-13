@@ -336,7 +336,8 @@ export default function RecorderScreen() {
       if (!token) throw new Error('Not authenticated');
       L('UPLOAD presign POST');
 
-      const createRes = await fetch(`${API_BASE}/media/mobile_create_session`, {
+      const ext = uri.toLowerCase().endsWith('.mp4') ? 'mp4' : 'mov';
+      const createRes = await fetch(`${API_BASE}/media/mobile_create_session?ext=${ext}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });

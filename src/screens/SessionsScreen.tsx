@@ -153,11 +153,8 @@ function LeaderboardAdjustmentsCard({ s }: { s: MobileSession }) {
 
       <View style={{ flexDirection: 'row', columnGap: 10, marginTop: S.sm }}>
         <Pressable
-          onPress={() => Alert.alert('Leaders', 'Leaderboard screen coming soon!')}
-          style={({ pressed }) => [
-            styles.buttonPrimary,
-            pressed && styles.buttonPressed,
-          ]}
+          onPress={() => navGo('Leaderboard')}
+          style={({ pressed }) => [styles.buttonPrimary, pressed && styles.buttonPressed]}
         >
           <Text style={styles.buttonPrimaryText}>View leaderboard</Text>
         </Pressable>
@@ -170,7 +167,7 @@ function LeaderboardAdjustmentsCard({ s }: { s: MobileSession }) {
               pressed && styles.buttonPressed,
             ]}
           >
-            <Text style={styles.buttonSecondaryText}>Personalized tip</Text>
+            <Text style={styles.buttonSecondaryText}>Rating Report</Text>
           </Pressable>
         )}
       </View>

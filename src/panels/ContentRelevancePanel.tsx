@@ -58,12 +58,12 @@ function useRelevanceScores(text?: string) {
       { key: 'directness', labels: ['Directness'], label: 'Directness', max: 30 },
       {
         key: 'imagery',
-        labels: ['Imagery & Examples', 'Imagery and Examples'],
+        labels: ['Imagery & Examples', 'Imagery and Examples', 'Examples & Specifics'],
         label: 'Imagery & Examples',
         max: 20,
       },
       { key: 'focus', labels: ['Focus'], label: 'Focus', max: 20 },
-      { key: 'coverage', labels: ['Coverage'], label: 'Coverage', max: 20 },
+      { key: 'coverage', labels: ['Coverage', 'Coverage (length-adjusted)'], label: 'Coverage', max: 20 },
       { key: 'accuracy', labels: ['Accuracy'], label: 'Accuracy', max: 10 },
     ];
 
