@@ -75,7 +75,12 @@ export default function ReinforcedEngagementPanel({ sessionId }: PanelProps) {
   return (
     <View style={{ marginHorizontal: 16, marginTop: 10 }}>
       {/* Description — collapsed by default */}
-      <CollapsibleBox title="Reinforced Engagement" initiallyCollapsed>
+      <CollapsibleBox title="Reinforced Engagement"         
+              initiallyCollapsed
+              backgroundColor={C.card}
+              borderColor={C.border}
+              headerTint={C.text}
+            >
         <Text style={{ color: C.label }}>
           This composite metric aligns the key ideas in your talk with engagement indicators
           (gestures, vocal variety, effective pauses, etc.) to estimate how compelling those

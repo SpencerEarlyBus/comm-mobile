@@ -8,6 +8,7 @@ import {
   Pressable,
   RefreshControl,
   StyleSheet,
+  Modal,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useQuery } from '@tanstack/react-query';
@@ -25,6 +26,17 @@ import { AppState } from 'react-native';
 import { focusManager } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { navGo } from '../navigation/navRef';
+import RatingReportModal from '../components/RatingReportModal';
+import { useLeftDrawer } from '../features/leftDrawer';
+import { makeDrawerStyles } from '../features/drawerStyles';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  runOnJS,
+} from 'react-native-reanimated';
+import LeftDrawerPlaceholder from '../components/LeftDrawerMainAdditionalNav';
 
 
 import Card from '../components/Card';
@@ -32,6 +44,11 @@ import AppCard from '../components/AppCard';
 import { C, S } from '../theme/tokens'; // { colors, spacing, radii }
 
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://your.api.domain';
+
+
+const HEADER_H = 56;
+const DRAWER_WIDTH = 280;
+
 
 type ScoresJson = Record<string, any>;
 
@@ -43,6 +60,8 @@ type MobileSession = {
   leaderboard_tag?: string | null;
   overall_score?: number | null;
   scores_json?: ScoresJson | null;
+  notes?: string | null;                  
+  leaderboard_info?: any | null;  
 };
 
 const METRIC_KEYS: { key: string; label: string }[] = [
@@ -127,7 +146,7 @@ function SessionSummaryCard({ s }: { s: MobileSession }) {
   );
 }
 
-function LeaderboardAdjustmentsCard({ s }: { s: MobileSession }) {
+function LeaderboardAdjustmentsCard({ s, onPressReport }: { s: MobileSession; onPressReport: () => void }) {
   const score = Math.max(0, Math.min(100, Number(s.overall_score ?? 0)));
   let tier = 'Rising';
   if (score >= 90) tier = 'Legend';
@@ -161,11 +180,8 @@ function LeaderboardAdjustmentsCard({ s }: { s: MobileSession }) {
 
         {!!s.topic && (
           <Pressable
-            onPress={() => Alert.alert('Tip', `Focus on improving "${s.topic}" next time to maximize gains.`)}
-            style={({ pressed }) => [
-              styles.buttonSecondary,
-              pressed && styles.buttonPressed,
-            ]}
+            onPress={onPressReport}
+            style={({ pressed }) => [styles.buttonSecondary, pressed && styles.buttonPressed]}
           >
             <Text style={styles.buttonSecondaryText}>Rating Report</Text>
           </Pressable>
@@ -175,19 +191,70 @@ function LeaderboardAdjustmentsCard({ s }: { s: MobileSession }) {
   );
 }
 
-function InsightsCard() {
+// SessionsScreen.tsx (or move to its own file if you prefer)
+function InsightsCard({ notes }: { notes?: string | null }) {
+  const parsedLines = React.useMemo(() => {
+    if (!notes) return null;
+
+    // Try JSON first
+    try {
+      const j = JSON.parse(notes);
+      if (Array.isArray(j)) {
+        const arr = j.map(String).map(s => s.trim()).filter(Boolean);
+        return arr.length ? arr.slice(0, 5) : null;
+      }
+      if (j && typeof j === 'object') {
+        const maybe = [
+          j.motivational || j.motivation,
+          j.strength || j.positive || j.good,
+          j.suggestion || j.improvement || j.tip,
+        ].filter(Boolean).map(String);
+        return maybe.length ? maybe.slice(0, 5) : null;
+      }
+    } catch {
+      // not JSON; fall through to plain text
+    }
+
+    // Plain text: split on lines
+    const lines = String(notes)
+      .split(/\r?\n/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    return lines.length ? lines.slice(0, 5) : null;
+  }, [notes]);
+
+  const hasInsights = !!parsedLines && parsedLines.length > 0;
+
   return (
     <AppCard style={{ marginHorizontal: S.md, marginTop: S.md }}>
-      <Text style={styles.h2}>AI Insights (coming soon)</Text>
-      <Text style={[styles.body, { marginTop: 6 }]}>
-        This area will summarize your performance and suggest targeted improvements based on recent sessions.
-      </Text>
-      <Text style={{ marginTop: 10, color: C.accent, fontWeight: '700' }}>
-        ↑ Tip: tap a dial above to learn more about that score
-      </Text>
+      <Text style={styles.h2}>Session Insights</Text>
+
+      {hasInsights ? (
+        <View style={{ marginTop: S.xs }}>
+          {parsedLines!.map((line, idx) => (
+            <View key={idx} style={{ flexDirection: 'row', alignItems: 'flex-start', marginTop: idx ? 6 : 8 }}>
+              <Text style={[styles.body, { marginRight: 8 }]}>•</Text>
+              <Text style={[styles.body, { flex: 1 }]}>{line}</Text>
+            </View>
+          ))}
+          <Text style={{ marginTop: 10, color: C.accent, fontWeight: '700' }}>
+            ↑ Tip: tap a dial above to learn more about each score
+          </Text>
+        </View>
+      ) : (
+        <>
+          <Text style={[styles.body, { marginTop: 6 }]}>
+            No AI insights for this session yet. Run a new session or try again in a bit.
+          </Text>
+          <Text style={{ marginTop: 10, color: C.accent, fontWeight: '700' }}>
+            ↑ Tip: tap a dial above to learn more about each score
+          </Text>
+        </>
+      )}
     </AppCard>
   );
 }
+
 
 
 
@@ -245,6 +312,42 @@ export default function SessionsScreen() {
   const footerExtra = (insets.bottom || 10) + 6;
   const bottomPad = FOOTER_BAR_HEIGHT + footerExtra;
 
+
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportInfo, setReportInfo] = useState<any | undefined>(undefined);
+
+  const openReportFor = useCallback((s?: MobileSession) => {
+    const info = s?.leaderboard_info ?? null; // can be object or JSON string
+    if (!info) {
+      Alert.alert('Rating Report', 'No rating update is available yet for this session.');
+      return;
+    }
+    setReportInfo(info);
+    setReportOpen(true);
+  }, []);
+  const HEADER_ROW_H = 56;
+  const headerHeight = (insets.top || 0) + HEADER_ROW_H;
+
+  const {
+    drawerOpen, openDrawer, closeDrawer,
+    edgeSwipe, drawerDrag, drawerStyle, overlayStyle
+  } = useLeftDrawer({ headerHeight, drawerWidth: DRAWER_WIDTH });
+
+  const drawerStyles = makeDrawerStyles({
+    headerHeight,
+    drawerWidth: DRAWER_WIDTH,
+    bgColor: C.bg,
+    borderColor: C.border,
+  });
+
+
+
+
+
+
+
+
+
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       // pause/reactivate React Query focus when app bg/fg changes
@@ -296,6 +399,8 @@ export default function SessionsScreen() {
         leaderboard_tag: r.leaderboard_tag,
         overall_score: r.overall_score,
         scores_json: r.scores_json,
+        notes: r.notes ?? null,                
+        leaderboard_info: r.leaderboard_info ?? null, 
       }));
     },
   });
@@ -342,14 +447,13 @@ export default function SessionsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* Subtle gradient BG */}
-      <LinearGradient
-        colors={['#0b1220', '#0b1220']}
-        style={StyleSheet.absoluteFill}
-      />
+      {/* BG */}
+      <LinearGradient colors={['#0b1220', '#0b1220']} style={StyleSheet.absoluteFill} />
 
+      {/* Header */}
       <HeaderBar
         title="Sessions"
+        onPressMenu={openDrawer}
         onPressNotifications={onPressNotifications}
         onPressStatus={onPressStatus}
         onPressReview={() => setPickerOpen(true)}
@@ -357,94 +461,122 @@ export default function SessionsScreen() {
         dark
       />
 
-      {/* Sticky, glassy metric dials bar */}
-{/* If there are no sessions, show an empty-state landing */}
-{!hasSessions && !isFetching ? (
-  <EmptyState bottomPad={bottomPad} />
-) : (
-  <>
-    {/* Sticky, glassy metric dials bar */}
-    <View
-      style={[
-        {
-          paddingVertical: 8,
-          backgroundColor: 'rgba(15,23,42,0.75)',
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderColor: C.border,
-        },
-        scrolled && {
-          shadowColor: '#000',
-          shadowOpacity: 0.25,
-          shadowRadius: 10,
-          shadowOffset: { width: 0, height: 8 },
-          elevation: 8,
-        },
-      ]}
-    >
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: S.md, columnGap: S.md }}
-      >
-        {dialMetrics.map((m) => (
-          <MetricDial
-            key={m.key}
-            label={m.label}
-            value={m.value}
-            active={selectedMetric === m.key}
-            onPress={async () => {
-              await Haptics.selectionAsync();
-              setSelectedMetric((prev) => (prev === m.key ? null : m.key));
-            }}
-          />
-        ))}
-      </ScrollView>
-    </View>
+      {/* CONTENT wrapped with edge-swipe — put ALL your content here */}
+      <GestureDetector gesture={edgeSwipe}>
+        <View style={{ flex: 1 }}>
+          {!hasSessions && !isFetching ? (
+            <EmptyState bottomPad={bottomPad} />
+          ) : (
+            <>
+              {/* Sticky dials bar */}
+              <View
+                style={[
+                  {
+                    paddingVertical: 8,
+                    backgroundColor: 'rgba(15,23,42,0.75)',
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                    borderBottomWidth: StyleSheet.hairlineWidth,
+                    borderColor: C.border,
+                  },
+                  scrolled && {
+                    shadowColor: '#000',
+                    shadowOpacity: 0.25,
+                    shadowRadius: 10,
+                    shadowOffset: { width: 0, height: 8 },
+                    elevation: 8,
+                  },
+                ]}
+              >
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: S.md, columnGap: S.md }}
+                >
+                  {dialMetrics.map((m) => (
+                    <MetricDial
+                      key={m.key}
+                      label={m.label}
+                      value={m.value}
+                      active={selectedMetric === m.key}
+                      onPress={async () => {
+                        await Haptics.selectionAsync();
+                        setSelectedMetric((prev) => (prev === m.key ? null : m.key));
+                      }}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
 
-    {/* Everything below dials can scroll */}
-    <View style={{ flex: 1 }}>
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: 24 }}
-        showsVerticalScrollIndicator={false}
-        onScroll={(e) => setScrolled(e.nativeEvent.contentOffset.y > 2)}
-        scrollEventThrottle={16}
-        refreshControl={
-          <RefreshControl
-            tintColor={C.accent}
-            colors={[C.accent]}
-            refreshing={isFetching}
-            onRefresh={() => refetch()}
-          />
-        }
-      >
-        {showSummary && !!sourceSession && (
-          <>
-            <SessionSummaryCard s={sourceSession} />
-            <LeaderboardAdjustmentsCard s={sourceSession} />
-            <InsightsCard />
-          </>
-        )}
+              {/* Scrollable body */}
+              <View style={{ flex: 1 }}>
+                <ScrollView
+                  contentContainerStyle={{ paddingBottom: 24 }}
+                  showsVerticalScrollIndicator={false}
+                  onScroll={(e) => setScrolled(e.nativeEvent.contentOffset.y > 2)}
+                  scrollEventThrottle={16}
+                  refreshControl={
+                    <RefreshControl
+                      tintColor={C.accent}
+                      colors={[C.accent]}
+                      refreshing={isFetching}
+                      onRefresh={() => refetch()}
+                    />
+                  }
+                >
+                  {showSummary && !!sourceSession && (
+                    <>
+                      <SessionSummaryCard s={sourceSession} />
+                      <LeaderboardAdjustmentsCard
+                        s={sourceSession}
+                        onPressReport={() => openReportFor(sourceSession)}
+                      />
+                      <InsightsCard notes={sourceSession.notes} />
+                    </>
+                  )}
 
-        {!!SelectedPanel && !!sourceSession && <SelectedPanel sessionId={sourceSession.id} />}
+                  {!!SelectedPanel && !!sourceSession && (
+                    <SelectedPanel sessionId={sourceSession.id} />
+                  )}
 
-        {/* Spacer so the footer nav never covers content */}
-        <View style={{ height: FOOTER_BAR_HEIGHT + (insets.bottom || 0) + 12 }} />
-      </ScrollView>
-    </View>
-  </>
-)}
+                  <View style={{ height: FOOTER_BAR_HEIGHT + (insets.bottom || 0) + 12 }} />
+                </ScrollView>
+              </View>
+            </>
+          )}
+        </View>
+      </GestureDetector>
 
+      {/* Overlay + Drawer LAST so they sit on top */}
+      {drawerOpen && (
+        <Pressable onPress={closeDrawer} style={StyleSheet.absoluteFill} pointerEvents="auto">
+          <Animated.View style={[drawerStyles.overlay, overlayStyle]} />
+        </Pressable>
+      )}
+
+      <GestureDetector gesture={drawerDrag}>
+        <Animated.View style={[drawerStyles.drawer, drawerStyle]}>
+          <LeftDrawerPlaceholder onClose={closeDrawer} />
+        </Animated.View>
+      </GestureDetector>
+
+      {/* Modals */}
       <SessionPickerModal
         visible={pickerOpen}
-        serverDriven   
-        items={(data ?? []) as any}  // still passed for graceful fallback
+        serverDriven
+        items={(data ?? []) as any}
         currentId={sourceSession?.id}
         onClose={() => setPickerOpen(false)}
         onSelect={(id) => setSelectedSessionId(id)}
       />
+
+      <RatingReportModal
+        visible={reportOpen}
+        info={reportInfo}
+        onClose={() => setReportOpen(false)}
+      />
     </View>
   );
+
 }
 
 const styles = StyleSheet.create({

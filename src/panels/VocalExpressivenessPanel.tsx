@@ -35,7 +35,12 @@ const VocalExpressivenessPanel: React.FC<PanelProps> = ({ sessionId }) => {
   return (
     <View style={{ marginHorizontal: 16, marginTop: 10 }}>
       {/* Description — collapsed by default */}
-      <CollapsibleBox title="Vocal expressiveness" initiallyCollapsed>
+      <CollapsibleBox title="Vocal expressiveness"               
+                    initiallyCollapsed
+                    backgroundColor={C.card}
+                    borderColor={C.border}
+                    headerTint={C.text}
+                  >
         <Text style={{ color: C.label }}>
           This metric assesses how engaging your voice is, focusing on pitch variation and energy stability.
           Strong expressiveness uses varied pitch at key moments and maintains a steady, confident volume.

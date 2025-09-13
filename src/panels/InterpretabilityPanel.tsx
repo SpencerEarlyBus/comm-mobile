@@ -36,6 +36,41 @@ function GradeMeter({
   );
 }
 
+
+function BarRow({
+  label,
+  percent,
+  rightText,
+  subRight,
+  help,
+}: {
+  label: string;
+  percent?: number | null;     // 0..100
+  rightText?: string;          // e.g. "93.9/100"
+  subRight?: string;           // e.g. "grade 8.49"
+  help?: string;
+}) {
+  const p = Math.max(0, Math.min(100, Number.isFinite(percent as number) ? (percent as number) : 0));
+  return (
+    <View style={{ gap: 4 }}>
+      <View style={styles.meterHeader}>
+        <Text style={styles.meterLabel}>{label}</Text>
+        <View style={{ alignItems: 'flex-end' }}>
+          {!!rightText && <Text style={styles.meterRight}>{rightText}</Text>}
+          {!!subRight && <Text style={styles.meterHelp}>{subRight}</Text>}
+        </View>
+      </View>
+      <View style={styles.meterTrack}>
+        <View style={[styles.meterFill, { width: `${p}%` }]} />
+      </View>
+      {!!help && <Text style={styles.meterHelp}>{help}</Text>}
+    </View>
+  );
+}
+
+
+
+
 const InterpretabilityPanel: React.FC<PanelProps> = ({ sessionId }) => {
   const { text, isLoading, isError, error, refetch } = useSessionInterpretabilityTxt(sessionId, true);
   const onRetry = useCallback(() => { refetch(); }, [refetch]);
@@ -45,11 +80,23 @@ const InterpretabilityPanel: React.FC<PanelProps> = ({ sessionId }) => {
   return (
     <View style={{ marginHorizontal: 16, marginTop: 10 }}>
       {/* Info (collapsed) */}
-      <CollapsibleBox title="Interpretability" initiallyCollapsed>
+      <CollapsibleBox title="Interpretability"               
+                    initiallyCollapsed
+                    backgroundColor={C.card}
+                    borderColor={C.border}
+                    headerTint={C.text}
+                  >
         <Text style={{ color: C.label }}>
           We estimate the reading grade level needed to understand your transcript using standard
           readability indices. Aim for an <Text style={{ fontWeight: '800', color: C.text }}>8–9</Text> grade level
           for broad accessibility.
+
+    Flesch-Kincaid Grade Level: Estimated school grade level needed to understand your transcript. 
+    SMOG Index: Grade estimate that takes into account syllables per word within the transcript. 
+    Automated Readability Index (ARI): Grade estimate that takes into account characters per word within the transcript. 
+    Coleman-Liau Index: Grade estimate that takes into account letters per 100 words and the average number of sentences within the same 100 words. 
+
+
         </Text>
       </CollapsibleBox>
 
@@ -79,35 +126,65 @@ const InterpretabilityPanel: React.FC<PanelProps> = ({ sessionId }) => {
           <View style={{ gap: 12 }}>
 
 
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Readability metrics</Text>
+          {/* Readability bands */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Readability (band scores)</Text>
 
-              <GradeMeter
-                label="Flesch–Kincaid"
-                grade={parsed.fk}
-                help="Estimated school grade level."
-              />
-              <GradeMeter
-                label="SMOG Index"
-                grade={parsed.smog}
-                help="Uses polysyllable density (syllables per word)."
-              />
-              <GradeMeter
-                label="Automated Readability (ARI)"
-                grade={parsed.ari}
-                help="Uses characters per word."
-              />
-              <GradeMeter
-                label="Coleman–Liau Index"
-                grade={parsed.cli}
-                help="Uses letters per 100 words & sentence density."
-              />
+            <BarRow
+              label="Flesch–Kincaid"
+              percent={parsed.fkBand}
+              rightText={parsed.fkBand != null ? `${parsed.fkBand.toFixed(1)}/100` : '—'}
+              subRight={parsed.fk != null ? `grade ${parsed.fk.toFixed(2)}` : undefined}
+            />
+            <BarRow
+              label="SMOG Index"
+              percent={parsed.smogBand}
+              rightText={parsed.smogBand != null ? `${parsed.smogBand.toFixed(1)}/100` : '—'}
+              subRight={parsed.smog != null ? `grade ${parsed.smog.toFixed(2)}` : undefined}
+            />
+            <BarRow
+              label="Automated Readability (ARI)"
+              percent={parsed.ariBand}
+              rightText={parsed.ariBand != null ? `${parsed.ariBand.toFixed(1)}/100` : '—'}
+              subRight={parsed.ari != null ? `grade ${parsed.ari.toFixed(2)}` : undefined}
+            />
+            <BarRow
+              label="Coleman–Liau Index"
+              percent={parsed.cliBand}
+              rightText={parsed.cliBand != null ? `${parsed.cliBand.toFixed(1)}/100` : '—'}
+              subRight={parsed.cli != null ? `grade ${parsed.cli.toFixed(2)}` : undefined}
+            />
 
+            {!!parsed.readabilityScore && (
               <Text style={styles.tip}>
-                Ideal window is <Text style={{ fontWeight: '800', color: C.text }}>8–9</Text>. Bars reflect how close
-                each metric’s grade is to that window (100% = in-range).
+                Aggregate readability score: <Text style={{ fontWeight: '800', color: C.text }}>
+                  {parsed.readabilityScore.toFixed(2)}/100
+                </Text>
               </Text>
-            </View>
+            )}
+          </View>
+
+          {/* Language control */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Language control</Text>
+
+            <BarRow
+              label="Repetition control"
+              percent={parsed.repetitionBand}
+              rightText={parsed.repetitionBand != null ? `${parsed.repetitionBand.toFixed(1)}/100` : '—'}
+              help="Trigram duplicate penalty (higher is better)."
+            />
+
+            <BarRow
+              label="Structure signals"
+              percent={parsed.structureBand}
+              rightText={parsed.structureBand != null ? `${parsed.structureBand.toFixed(1)}/100` : '—'}
+              help="Opening, signposts, and closing cues."
+            />
+
+
+          </View>
+
           </View>
         )}
       </CollapsibleBox>

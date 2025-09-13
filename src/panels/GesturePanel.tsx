@@ -187,7 +187,7 @@ const GesturePanel: React.FC<PanelProps> = ({ sessionId }) => {
     <View style={{ marginHorizontal: 16, marginTop: 10 }}>
       {/* Overview */}
       <CollapsibleBox
-        title="Body Language — Overview"
+        title="Body Gesturing"
         initiallyCollapsed
         backgroundColor={C.card}
         borderColor={C.border}

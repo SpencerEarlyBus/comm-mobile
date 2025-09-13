@@ -11,14 +11,23 @@ import CollapsibleBox from '../components/CollapsibleBox';
 import { COLORS as C } from '../theme/colors';
 
 type PostureParsed = {
-  openPct?: number;         // Open posture %
-  belowWaistPct?: number;   // Hands below waist %
+  openPct?: number;         // Open posture % (higher is better)
+  belowWaistPct?: number;   // Hands below waist % (lower is better)
   postureScore?: number;    // 0..100
   frames?: number;          // optional
 };
 
+const clamp = (v: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, v));
 const pctNum = (s?: string) => (s ? parseFloat(s.replace('%', '').trim()) : NaN);
 const intNum = (s?: string) => (s ? parseInt(s.replace(/,/g, ''), 10) : NaN);
+
+// Inverse linear: 0% => 100; >= maxBad% => 0 (default maxBad=30%)
+function inversePctScore(p: number, maxBad = 30) {
+  if (!isFinite(p)) return 0;
+  if (p <= 0) return 100;
+  if (p >= maxBad) return 0;
+  return clamp(100 - (p / maxBad) * 100, 0, 100);
+}
 
 function parsePostureText(txt?: string): PostureParsed {
   if (!txt) return {};
@@ -37,8 +46,24 @@ function parsePostureText(txt?: string): PostureParsed {
   };
 }
 
+function Meter({ label, value, help }: { label: string; value: number; help?: string }) {
+  const v = clamp(Math.round(value), 0, 100);
+  return (
+    <View style={{ marginTop: 8 }}>
+      <View style={styles.meterHeader}>
+        <Text style={styles.meterLabel}>{label}</Text>
+        <Text style={styles.meterRight}>{v}/100</Text>
+      </View>
+      <View style={styles.meterTrack}>
+        <View style={[styles.meterFill, { width: `${v}%` }]} />
+      </View>
+      {!!help && <Text style={styles.meterHelp}>{help}</Text>}
+    </View>
+  );
+}
+
 const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
-  // 1) Posture text (unchanged)
+  // 1) Posture text
   const {
     text: bodyText,
     isLoading: bodyLoading,
@@ -48,7 +73,13 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
   } = useSessionBodyText(sessionId, true);
   const parsed = useMemo(() => parsePostureText(bodyText), [bodyText]);
 
-  // 2) Plain Session Video (unchanged logic)
+  // Derived bars
+  const openScore = Number.isFinite(parsed.openPct) ? clamp(parsed.openPct as number) : undefined; // higher is better
+  const belowWaistScore = Number.isFinite(parsed.belowWaistPct)
+    ? inversePctScore(parsed.belowWaistPct as number) // lower is better
+    : undefined;
+
+  // 2) Plain Session Video
   const {
     data: url,
     isLoading: presignLoading,
@@ -58,9 +89,7 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
   } = usePresignedVideoUrl(sessionId, false);
   const [videoOpen, setVideoOpen] = useState(false);
 
-  useEffect(() => {
-    if (videoOpen) refetchVideo();
-  }, [videoOpen, refetchVideo]);
+  useEffect(() => { if (videoOpen) refetchVideo(); }, [videoOpen, refetchVideo]);
 
   const player = useVideoPlayer('', (p) => {
     p.loop = false;
@@ -102,7 +131,7 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
   const retryText = useCallback(() => refetchBody(), [refetchBody]);
   const retryVideo = useCallback(() => { setLoadError(null); refetchVideo(); }, [refetchVideo]);
 
-  // 3) Annotated Session Video (NEW)
+  // 3) Annotated Session Video
   const {
     data: annotatedUrl,
     isLoading: annotatedLoading,
@@ -113,11 +142,8 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
 
   const [annotatedOpen, setAnnotatedOpen] = useState(false);
 
-  useEffect(() => {
-    if (annotatedOpen) refetchAnnotated(); // fetch fresh presign when opened
-  }, [annotatedOpen, refetchAnnotated]);
+  useEffect(() => { if (annotatedOpen) refetchAnnotated(); }, [annotatedOpen, refetchAnnotated]);
 
-  // Separate player for annotated video
   const annotatedPlayer = useVideoPlayer('', (p) => {
     p.loop = false;
     p.timeUpdateEventInterval = 0.25;
@@ -164,7 +190,7 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
     <View style={{ marginHorizontal: 16, marginTop: 10 }}>
       {/* Overview */}
       <CollapsibleBox
-        title="Posture — Overview"
+        title="Body Posture"
         initiallyCollapsed
         backgroundColor={C.card}
         borderColor={C.border}
@@ -199,29 +225,32 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
         ) : !bodyText ? (
           <Text style={styles.emptyText}>No body-language analysis available.</Text>
         ) : (
-          <View style={{ gap: 8 }}>
+          <View style={{ gap: 10 }}>
             {!!parsed.frames && (
               <Text style={styles.dim}>Frames analyzed: {parsed.frames.toLocaleString()}</Text>
             )}
-            <View style={{ gap: 4 }}>
-              <Text style={styles.line}>
-                <Text style={styles.k}>Open posture:</Text>{' '}
-                <Text style={styles.v}>
-                  {parsed.openPct != null ? `${parsed.openPct.toFixed(2)}%` : '—'}
-                </Text>
+
+            <View>
+              <Text style={styles.sectionTitle}>Posture — breakdown</Text>
+              <Text style={styles.dim}>
+                100 for open posture at 100%; 100 for hands-below-waist at 0%.
               </Text>
-              <Text style={styles.line}>
-                <Text style={styles.k}>Hands below waist:</Text>{' '}
-                <Text style={styles.v}>
-                  {parsed.belowWaistPct != null ? `${parsed.belowWaistPct.toFixed(2)}%` : '—'}
-                </Text>
-              </Text>
-              <Text style={styles.line}>
-                <Text style={styles.k}>Posture Score:</Text>{' '}
-                <Text style={styles.v}>
-                  {parsed.postureScore != null ? `${Math.round(parsed.postureScore)}/100` : '—'}
-                </Text>
-              </Text>
+
+              {Number.isFinite(parsed.openPct) && (
+                <Meter
+                  label={`Open posture — ${(parsed.openPct as number).toFixed(2)}%`}
+                  value={openScore ?? 0}
+                  help="Higher is better (100% = ideal)."
+                />
+              )}
+
+              {Number.isFinite(parsed.belowWaistPct) && (
+                <Meter
+                  label={`Hands below waist — ${(parsed.belowWaistPct as number).toFixed(2)}%`}
+                  value={belowWaistScore ?? 0}
+                  help="Lower is better (0% = 100)."
+                />
+              )}
             </View>
           </View>
         )}
@@ -285,7 +314,7 @@ const PosturePanel: React.FC<PanelProps> = ({ sessionId }) => {
         )}
       </CollapsibleBox>
 
-      {/* Annotated Session Video (NEW) */}
+      {/* Annotated Session Video */}
       <CollapsibleBox
         title="Annotated Session Video"
         initiallyCollapsed
@@ -362,8 +391,14 @@ const styles = StyleSheet.create({
   retryText: { color: C.white, fontWeight: '700' },
   emptyText: { color: C.label },
 
-  line: { color: C.text, fontSize: 14 },
-  k: { color: C.label, fontSize: 14, fontWeight: '700' },
-  v: { color: C.white, fontSize: 14, fontWeight: '800' },
+  sectionTitle: { color: C.text, fontSize: 13, fontWeight: '800' },
   dim: { color: C.label, fontSize: 12 },
+
+  // Meters (same visual language as Gesture panel)
+  meterHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  meterLabel: { color: C.label, fontSize: 12, fontWeight: '600' },
+  meterRight: { color: C.text, fontSize: 12, fontWeight: '700' },
+  meterTrack: { height: 8, backgroundColor: C.track, borderRadius: 999, overflow: 'hidden', marginTop: 4 },
+  meterFill: { height: 8, backgroundColor: C.accent, borderRadius: 999 },
+  meterHelp: { color: C.label, fontSize: 11, marginTop: 4 },
 });

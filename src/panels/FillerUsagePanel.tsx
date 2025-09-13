@@ -91,7 +91,12 @@ export default function FillerUsagePanel({ sessionId }: PanelProps) {
   return (
     <View style={{ marginHorizontal: 16, marginTop: 10 }}>
       {/* Description */}
-      <CollapsibleBox title="Filler Usage" initiallyCollapsed>
+      <CollapsibleBox title="Filler Usage"               
+                    initiallyCollapsed
+                    backgroundColor={C.card}
+                    borderColor={C.border}
+                    headerTint={C.text}
+                  >
         <Text style={{ color: C.label }}>
           This metric tracks verbal fillers (e.g., “um”, “uh”, “like”) and estimates your filler density.
           Lower density generally improves clarity and confidence.

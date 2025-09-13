@@ -24,6 +24,8 @@ import { T } from '../theme/typography';
 import { S } from '../theme/spacing';
 import { useAuth } from '../context/MobileAuthContext';
 import MetricDial from '../components/MetricDial';
+import { Ionicons } from '@expo/vector-icons';
+
 
 type MyRating = {
   rating: number | null;
@@ -107,6 +109,14 @@ export default function LeaderboardScreen() {
   const [standTotal, setStandTotal] = React.useState<number>(0);
   const [standLoading, setStandLoading] = React.useState(false);
   const [standOffset, setStandOffset] = React.useState(0);
+
+  const COLS = {
+    RANK: 36,   // "#"
+    ICON: 34,   // avatar (26px fits comfortably)
+    NUM: 72,    // rating / avg / sessions
+    CHEV: 48,   // trailing chevron
+  } as const;
+
 
   // Modal state (metrics-only)
   const [detail, setDetail] = React.useState<{
@@ -417,7 +427,13 @@ export default function LeaderboardScreen() {
                     </View>
                   </View>
 
-                  <Text style={[T.subtle, { marginTop: S.sm }]}>Tap to view your metric averages</Text>
+                  <View style={styles.ctaRow}>
+                    <View style={styles.ctaPill}>
+                      <Ionicons name="stats-chart" size={14} color={C.bg} />
+                      <Text style={styles.ctaPillText}>View Metrics</Text>
+                    </View>
+                  </View>
+
                 </Pressable>
               </AppCard>
             ) : (
@@ -437,16 +453,24 @@ export default function LeaderboardScreen() {
           ) : null}
 
 
-
           {/* Standings */}
           {selectedTag ? (
             <AppCard padded={false} style={{ marginHorizontal: S.md, marginTop: S.md }}>
+              {/* Header with fixed columns */}
               <View style={styles.tableHeader}>
-                <Text style={[styles.th, { width: 36, textAlign: 'center' }]}>#</Text>
-                <Text style={[styles.th, { flex: 1 }]}>User</Text>
-                <Text style={[styles.th, { width: 70, textAlign: 'right' }]}>Rating</Text>
-                <Text style={[styles.th, { width: 72, textAlign: 'right' }]}>Avg</Text>
-                <Text style={[styles.th, { width: 72, textAlign: 'right' }]}>Sessions</Text>
+                <Text style={[styles.th, { width: COLS.RANK, textAlign: 'center' }]}>#</Text>
+
+                {/* icon header (centered) */}
+                <View style={{ width: COLS.ICON, alignItems: 'center' }}>
+                  <Ionicons name="person-circle-outline" size={16} color={C.label} />
+                </View>
+
+                <Text style={[styles.th, { width: COLS.NUM, textAlign: 'right' }]}>Rating</Text>
+                <Text style={[styles.th, { width: COLS.NUM, textAlign: 'right' }]}>Avg</Text>
+                <Text style={[styles.th, { width: COLS.NUM, textAlign: 'right' }]}>Sessions</Text>
+
+                {/* spacer to align with chevron column */}
+                <View style={{ width: COLS.CHEV }} />
               </View>
 
               {standLoading && standings.length === 0 ? (
@@ -466,29 +490,45 @@ export default function LeaderboardScreen() {
                         await Haptics.selectionAsync();
                         setDetail({ name, metrics: row.metrics_average ?? null });
                       }}
+                      android_ripple={{ color: 'rgba(14,165,233,0.12)', borderless: false }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Row ${place}, rating ${Math.round(row.rating)}, average ${row.average_score ?? '—'}, sessions ${row.session_count}`}
                       style={({ pressed }) => [
                         styles.tr,
-                        isYou && { backgroundColor: 'rgba(14,165,233,0.12)' },
-                        pressed && { opacity: 0.95 },
+                        isYou && styles.trYou,
+                        pressed && styles.trPressed,
                       ]}
+                      hitSlop={6}
                     >
-                      <Text style={[styles.td, styles.rankCell]}>{place}</Text>
+                      {/* Rank */}
+                      <Text style={[styles.td, { width: COLS.RANK, textAlign: 'center', color: C.label }]}>
+                        {place}
+                      </Text>
 
-                      <View style={styles.participantCell}>
+                      {/* Avatar (centered) */}
+                      <View style={{ width: COLS.ICON, alignItems: 'center' }}>
                         <View style={styles.avatar}>
-                          <Text style={styles.avatarText}>{initials(row.display_name, row.user_email)}</Text>
-                        </View>
-                        <View style={styles.participantTextCol}>
-                          <Text style={styles.name} numberOfLines={1}>{name}</Text>
-                          {!!row.user_email && <Text style={styles.subName} numberOfLines={1}>{row.user_email}</Text>}
+                          <Text style={styles.avatarText}>
+                            {initials(row.display_name, row.user_email)}
+                          </Text>
                         </View>
                       </View>
 
-                      <Text style={[styles.td, styles.num]}>{Math.round(row.rating)}</Text>
-                      <Text style={[styles.td, styles.num]}>
+                      {/* Numbers */}
+                      <Text style={[styles.td, { width: COLS.NUM, textAlign: 'right' }]}>
+                        {Math.round(row.rating)}
+                      </Text>
+                      <Text style={[styles.td, { width: COLS.NUM, textAlign: 'right' }]}>
                         {row.average_score != null ? Math.round(row.average_score) : '—'}
                       </Text>
-                      <Text style={[styles.td, styles.num]}>{row.session_count}</Text>
+                      <Text style={[styles.td, { width: COLS.NUM, textAlign: 'right' }]}>
+                        {row.session_count}
+                      </Text>
+
+                      {/* Trailing chevron */}
+                      <View style={{ width: COLS.CHEV, alignItems: 'flex-end' }}>
+                        <Ionicons name="chevron-forward" size={16} color="#cbd5e1" />
+                      </View>
                     </Pressable>
                   );
                 })
@@ -507,11 +547,14 @@ export default function LeaderboardScreen() {
                     <Text style={styles.loadMoreText}>{standLoading ? 'Loading…' : 'Load more'}</Text>
                   </Pressable>
                 ) : standings.length > 0 ? (
-                  <Text style={[T.subtle, { textAlign: 'center', paddingVertical: 6 }]}>End of standings</Text>
+                  <Text style={[T.subtle, { textAlign: 'center', paddingVertical: 6 }]}>
+                    End of standings
+                  </Text>
                 ) : null}
               </View>
             </AppCard>
           ) : null}
+
         </View>
       </Screen>
 
@@ -568,6 +611,10 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
   },
 
+  trYou: { backgroundColor: 'rgba(14,165,233,0.10)' }, // highlight your row
+  trPressed: { backgroundColor: 'rgba(14,165,233,0.08)' },
+
+
   // Screen padding uses spacing tokens
   contentTight: { paddingTop: S.sm, paddingHorizontal: S.md, paddingBottom: 90 },
   rootTight: { gap: S.sm },
@@ -618,6 +665,37 @@ const styles = StyleSheet.create({
     backgroundColor: C.accent,
   },
   loadMoreText: { color: C.bg, fontWeight: '700' },
+
+  ctaRow: {
+    marginTop: S.sm,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+
+  // Blue pill (matches buttonPrimary colors but smaller + rounded)
+  ctaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: C.accent,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  ctaPillText: { color: C.bg, fontWeight: '800', fontSize: 12 },
+
+  // Light variant for the “not participating” card
+  ctaPillAlt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  ctaPillAltText: { color: '#0f172a', fontWeight: '800', fontSize: 12 },
+
 });
 
 
@@ -655,6 +733,13 @@ const mstyles = StyleSheet.create({
   meterValue: { color: C.text, fontSize: 12, fontWeight: '700' },
   meterTrack: { height: 8, backgroundColor: C.track, borderRadius: 999, overflow: 'hidden', marginTop: 4 },
   meterFill: { height: 8, backgroundColor: C.accent, borderRadius: 999 },
+
+
+
+
+
+
+  
 });
 
 

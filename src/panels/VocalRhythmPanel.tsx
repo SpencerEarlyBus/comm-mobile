@@ -42,7 +42,12 @@ const VocalRhythmPanel: React.FC<PanelProps> = ({ sessionId }) => {
   return (
     <View style={{ marginHorizontal: 16, marginTop: 10 }}>
       {/* Description — collapsed by default */}
-      <CollapsibleBox title="Vocal pace" initiallyCollapsed>
+      <CollapsibleBox title="Vocal pace"               
+                    initiallyCollapsed
+                    backgroundColor={C.card}
+                    borderColor={C.border}
+                    headerTint={C.text}
+                  >
         <Text style={{ color: C.label }}>
           This metric evaluates your speaking pace and cadence. We consider words per minute (WPM) and
           rhythm consistency over time. Optimal comprehension is often around 120–160 WPM.

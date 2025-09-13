@@ -19,9 +19,10 @@ export const COLORS = {
   white: '#ffffff',
   black: '#000000',
 
-  // New tokens for consistency
-  bgGlass: 'rgba(15, 23, 42, 0.94)',        // footer bar glass
-  headerGlass: 'rgba(15, 23, 42, 0.75)',    // sticky dials bar
+  bgGlass: 'rgba(15, 23, 42, 0.94)',
+  headerGlass: 'rgba(15, 23, 42, 0.75)',
+  // add a dedicated panel color if you want it distinct from card:
+  panel: '#0f172a',
 } as const;
 
 export type ColorKey = keyof typeof COLORS;

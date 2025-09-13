@@ -16,6 +16,8 @@ import { COLORS } from '../theme/colors';
 import LeaderboardCard, { LeaderboardItem } from '../components/LeaderboardCard';
 import { useAuth } from '../context/MobileAuthContext';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -39,10 +41,16 @@ const DRAWER_WIDTH = 280;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const HEADER_H = 56; // keep in sync with your <HeaderBar/> visual height
 
+const HEADER_ROW_H = 56;
+
+
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
 export default function ExploreLeaderboardsScreen({ navigation }: any) {
   const { isAuthenticated, fetchWithAuth } = useAuth() as any;
+
+  const insets = useSafeAreaInsets();
+  const headerTop = (insets.top || 0) + HEADER_ROW_H;
 
   const [query, setQuery] = useState('');
   const [items, setItems] = useState<LeaderboardItem[]>([]);
@@ -151,7 +159,7 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
     .failOffsetY([-12, 12])   // fail if vertical motion grows
     .onStart((e) => {
       const fromLeftEdge = e.absoluteX < 20;
-      const belowHeader = e.absoluteY > HEADER_H;
+      const belowHeader = e.absoluteY > headerTop;
       if (!drawerOpen && !(fromLeftEdge && belowHeader)) return;
       dragStartX.value = drawerX.value;
     })
@@ -279,16 +287,6 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
               ListHeaderComponent={
                 <View style={styles.stickySearch}>
                   <View style={styles.searchRow}>
-                    <Pressable
-                      onPress={openDrawer}
-                      style={({ pressed }) => [styles.menuBtn, pressed && { opacity: 0.8 }]}
-                      hitSlop={8}
-                      accessibilityRole="button"
-                      accessibilityLabel="Open categories menu"
-                    >
-                      <Text style={styles.menuBtnText}>☰</Text>
-                    </Pressable>
-
                     <TextInput
                       placeholder="Search leaderboards…"
                       placeholderTextColor={COLORS.label}
@@ -298,15 +296,29 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
                       returnKeyType="search"
                       onSubmitEditing={runSearch}
                     />
+
                     <Pressable
                       onPress={runSearch}
                       style={({ pressed }) => [styles.searchBtn, pressed && { opacity: 0.92 }]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Run search"
                     >
                       <Text style={styles.searchBtnText}>Search</Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={openDrawer}
+                      style={({ pressed }) => [styles.menuBtn, pressed && { opacity: 0.8 }]}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Open search options"
+                    >
+                      <Ionicons name="options-outline" size={20} color={COLORS.text} />
                     </Pressable>
                   </View>
                 </View>
               }
+
               ListEmptyComponent={
                 <View style={styles.emptyBox}>
                   <Text style={styles.emptyTitle}>No leaderboards yet</Text>
@@ -339,13 +351,14 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
           accessibilityRole="button"
           accessibilityLabel="Close categories menu"
         >
-          <Animated.View style={[styles.overlay, overlayStyle]} />
+          {/* override top at runtime */}
+          <Animated.View style={[styles.overlay, { top: headerTop }, overlayStyle]} />
         </Pressable>
       )}
 
       {/* DRAWER, below header only */}
       <GestureDetector gesture={drawerDrag}>
-        <Animated.View style={[styles.drawer, drawerStyle]}>
+        <Animated.View style={[styles.drawer, { top: headerTop }, drawerStyle]}>
           <Text style={styles.drawerTitle}>Active Leaderboards</Text>
 
           <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
@@ -403,8 +416,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   menuBtn: {
-    marginLeft: 12,
-    marginRight: 8,
+
     height: 40,
     minWidth: 40,
     alignItems: 'center',
@@ -428,6 +440,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
+
+  optionsBtn: {
+    height: 40,
+    width: 40,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)', 
+  },
+
   searchBtn: {
     marginRight: 20,
     marginLeft: 8,
@@ -461,17 +483,16 @@ const styles = StyleSheet.create({
   // Overlay below header
   overlay: {
     position: 'absolute',
-    top: HEADER_H,
     left: 0,
     right: 0,
     bottom: 0,
     backgroundColor: '#000',
+    zIndex: 10, 
   },
 
   // Drawer below header
   drawer: {
     position: 'absolute',
-    top: HEADER_H,
     bottom: 0,
     left: 0,
     width: DRAWER_WIDTH,
@@ -485,6 +506,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 2, height: 0 },
     elevation: 6,
+    zIndex: 20,
   },
   drawerTitle: { color: COLORS.text, fontSize: 18, fontWeight: '800', marginVertical: 8 },
   catItem: {

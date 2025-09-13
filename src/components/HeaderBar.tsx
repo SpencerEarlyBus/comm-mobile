@@ -1,3 +1,4 @@
+// components/HeaderBar.tsx
 import React from 'react';
 import { View, Text, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -5,18 +6,20 @@ import { Ionicons } from '@expo/vector-icons';
 
 type Props = {
   title: string;
+  onPressMenu?: () => void;        // NEW: open left drawer
   onPressNotifications?: () => void;
   onPressStatus?: () => void;
-  onPressReview?: () => void;     // NEW: open session picker
+  onPressReview?: () => void;
   inFlightDot?: boolean;
   dark?: boolean;
 };
 
 export default function HeaderBar({
   title,
+  onPressMenu,                    // NEW
   onPressNotifications,
   onPressStatus,
-  onPressReview,                 // NEW
+  onPressReview,
   inFlightDot = false,
   dark = false,
 }: Props) {
@@ -35,10 +38,23 @@ export default function HeaderBar({
   return (
     <View style={{ backgroundColor: bg, paddingTop: insets.top, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border }}>
       <View style={styles.row}>
-        <Text numberOfLines={1} style={[styles.title, { color: titleColor }]}>{title}</Text>
+        {/* Left cluster: menu + title */}
+        <View style={styles.left}>
+          {!!onPressMenu && (
+            <Pressable
+              accessibilityLabel="Open menu"
+              onPress={onPressMenu}
+              hitSlop={10}
+              style={({ pressed }) => [{ padding: 6, opacity: pressed ? 0.6 : 1 }]}
+            >
+              <Ionicons name="menu-outline" size={ICON_SIZE} color={iconColor} />
+            </Pressable>
+          )}
+          <Text numberOfLines={1} style={[styles.title, { color: titleColor }]}>{title}</Text>
+        </View>
 
+        {/* Right cluster */}
         <View style={styles.right}>
-          {/* Review / picker — only render if a handler is provided */}
           {onPressReview && (
             <Pressable
               accessibilityLabel="Review sessions"
@@ -50,7 +66,6 @@ export default function HeaderBar({
             </Pressable>
           )}
 
-          {/* Notifications */}
           <Pressable
             accessibilityLabel="Notifications"
             onPress={onPressNotifications}
@@ -60,22 +75,7 @@ export default function HeaderBar({
             <Ionicons name="notifications-outline" size={ICON_SIZE} color={iconColor} />
           </Pressable>
 
-          {/* Status */}
-          <Pressable
-            accessibilityLabel="Session status"
-            onPress={onPressStatus}
-            hitSlop={10}
-            style={({ pressed }) => [{ padding: 6, opacity: pressed ? 0.6 : 1 }]}
-          >
-            <View style={{ position: 'relative' }}>
-              <Ionicons name="cloud-upload-outline" size={ICON_SIZE} color={iconColor} />
-              {inFlightDot && (
-                <View style={styles.dotWrap}>
-                  <View style={[styles.dot, { borderColor: bg }]} />
-                </View>
-              )}
-            </View>
-          </Pressable>
+          {/* If you bring back a status icon, place it here */}
         </View>
       </View>
     </View>
@@ -84,8 +84,7 @@ export default function HeaderBar({
 
 const styles = StyleSheet.create({
   row: { height: 56, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, justifyContent: 'space-between' },
+  left: { flexDirection: 'row', alignItems: 'center', columnGap: 8, flexShrink: 1 },
   title: { fontSize: 20, fontWeight: '700' },
   right: { flexDirection: 'row', alignItems: 'center', columnGap: 6 },
-  dotWrap: { position: 'absolute', right: -2, top: -2 },
-  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#22c55e', borderWidth: 2 },
 });

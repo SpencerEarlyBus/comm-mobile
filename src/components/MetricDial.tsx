@@ -8,8 +8,8 @@ const COLORS = {
   label: '#cbd5e1',
   track: 'rgba(148,163,184,0.25)',
   ringBg: 'rgba(15,23,42,0.85)',
-  activeArc: '#ffffff',
-  activeLabelBg: '#ffffff',
+  activeArc: '#FFC107',
+  activeLabelBg: '#FFC107',
   activeLabelText: '#0b1220',
 };
 
