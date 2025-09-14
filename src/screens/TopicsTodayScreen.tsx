@@ -380,6 +380,11 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
             <Text style={styles.catText}>Private Leaderboards</Text>
           </Pressable>
 
+
+          <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
+            <Text style={styles.catText}>Job Postings</Text>
+          </Pressable>
+
           <View style={{ height: 14 }} />
           <Pressable onPress={closeDrawer} style={styles.closeBtn}>
             <Text style={styles.closeBtnText}>Close</Text>

@@ -12,9 +12,12 @@ import {
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { C, S } from '../theme/tokens';
+import QuestionsModal from './QuestionsModal';
+import { useAuth } from '../context/MobileAuthContext'; 
 
 type Props = { onClose?: () => void };
 
+const CASE_PDF_KEY = 'frontend_media/Loss_of_B2B_Client_Report.pdf';
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://your.api.domain';
 
 // Simple chevron
@@ -27,6 +30,7 @@ function Chevron({ open }: { open: boolean }) {
 }
 
 export default function LeftDrawerPlaceholder({ onClose }: Props) {
+    const { fetchWithAuth } = useAuth();
   // Collapsible sections
   const [lectauraOpen, setLectauraOpen] = useState(true);
 
@@ -35,6 +39,44 @@ export default function LeftDrawerPlaceholder({ onClose }: Props) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [loadingUrl, setLoadingUrl] = useState(false);
   const [urlError, setUrlError] = useState<string | null>(null);
+
+
+
+    //Questions Modal State
+  const [qOpen, setQOpen] = useState(false);
+  const [qLoading, setQLoading] = useState(false);
+  const [qError, setQError] = useState<string | null>(null);
+  const [qTopic, setQTopic] = useState<string | undefined>(undefined);
+  const [qList, setQList] = useState<string[]>([]);
+  const [qPdfUrl, setQPdfUrl] = useState<string | null>(null);
+
+  const runDocQuestions = useCallback(async () => {
+    setQLoading(true);
+    setQError(null);
+    setQTopic(undefined);
+    setQList([]);
+    setQPdfUrl(null);
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/mobile/doc-questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ s3_key: CASE_PDF_KEY }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+      setQTopic(data?.topic || '');
+      setQList(Array.isArray(data?.questions) ? data.questions : []);
+      setQPdfUrl(data?.pdf_url || null);
+    } catch (e: any) {
+      setQError(e?.message ?? 'Failed to generate questions');
+    } finally {
+      setQLoading(false);
+    }
+  }, [fetchWithAuth]);
+
+
 
   // Video player
   const player = useVideoPlayer('', (p) => {
@@ -137,18 +179,22 @@ export default function LeftDrawerPlaceholder({ onClose }: Props) {
               <Text style={styles.badge}>Watch</Text>
             </Pressable>
 
-            {/* More placeholders to fill later */}
+            {/* --- NEW: Case study PDF → generate questions --- */}
             <Pressable
-              disabled
-              style={[styles.listItem, { opacity: 0.6 }]}
+              onPress={() => { setQOpen(true); runDocQuestions(); }}
+              style={({ pressed }) => [styles.listItem, pressed && styles.listItemPressed]}
+              accessibilityRole="button"
             >
+              <Text style={styles.listItemText}>• PDF</Text>
+              <Text style={styles.badge}>Questions</Text>
+            </Pressable>
+
+            {/* placeholders */}
+            <Pressable disabled style={[styles.listItem, { opacity: 0.6 }]}>
               <Text style={styles.listItemText}>• Dials & Scores</Text>
               <Text style={styles.badgeMuted}>Soon</Text>
             </Pressable>
-            <Pressable
-              disabled
-              style={[styles.listItem, { opacity: 0.6 }]}
-            >
+            <Pressable disabled style={[styles.listItem, { opacity: 0.6 }]}>
               <Text style={styles.listItemText}>• Leaderboards</Text>
               <Text style={styles.badgeMuted}>Soon</Text>
             </Pressable>
@@ -221,6 +267,19 @@ export default function LeftDrawerPlaceholder({ onClose }: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+
+      <QuestionsModal
+        visible={qOpen}
+        onClose={() => setQOpen(false)}
+        loading={qLoading}
+        error={qError}
+        topic={qTopic}
+        questions={qList}
+        pdfUrl={qPdfUrl}
+      />
+
+
     </View>
   );
 }
