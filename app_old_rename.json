@@ -12,12 +12,12 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-
     "scheme": "comm",
-    "runtimeVersion": { "policy": "appVersion" },
-
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "ios": {
-      "bundleIdentifier": "com.yourco.comm",  
+      "bundleIdentifier": "com.yourco.comm",
       "buildNumber": "1",
       "supportsTablet": true,
       "infoPlist": {
@@ -25,10 +25,8 @@
         "NSMicrophoneUsageDescription": "We use the microphone to record audio.",
         "NSPhotoLibraryUsageDescription": "We access your photo library when you pick media.",
         "NSPhotoLibraryAddUsageDescription": "We save rendered media to your Photo Library."
-
       }
     },
-
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -36,11 +34,9 @@
       },
       "edgeToEdgeEnabled": true
     },
-
     "web": {
       "favicon": "./assets/favicon.png"
     },
-
     "plugins": [
       "expo-secure-store",
       "expo-dev-client",
@@ -49,9 +45,15 @@
       "expo-file-system",
       "expo-video"
     ],
-
     "updates": {
-      "requestHeaders": { "expo-channel-name": "production" }
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "320404f1-d9e6-4194-a056-722e93498ab9"
+      }
     }
   }
 }
