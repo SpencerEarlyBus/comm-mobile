@@ -7,20 +7,21 @@ import {
   StyleSheet,
   useWindowDimensions,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';   // ⬅️ NEW
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navGo } from '../navigation/navRef';
 import { useUIChrome } from '../context/UIChromeContext';
+import { useAuth } from '../context/MobileAuthContext';
+import { C } from '../theme/tokens';
 
 type Props = { currentRoute?: string };
 export const FOOTER_BAR_HEIGHT = 64;
 
 export default function FooterNav({ currentRoute }: Props) {
-  // hooks (always run)
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { hidden } = useUIChrome();
+  const { authReady, isAuthenticated } = useAuth() as any;
 
   const base = 390;
   const scale = Math.min(Math.max(width / base, 0.9), 1.15);
@@ -29,9 +30,14 @@ export default function FooterNav({ currentRoute }: Props) {
   const REC_BTN_CLAMP = Math.min(Math.max(REC_BTN, 40), 52);
 
   const isActive = (r: string) => currentRoute === r;
-  const isRecorderActive = currentRoute === 'Recorder' && !hidden;
 
-  if (hidden) return null;
+  // 🔒 Hide footer on Home (login/signup) or if not authed, or if UI chrome requests hidden
+  const shouldHide =
+    hidden ||
+    currentRoute === 'Home' ||
+    (authReady && !isAuthenticated);
+
+  if (shouldHide) return null;
 
   return (
     <View pointerEvents="box-none" style={{ ...StyleSheet.absoluteFillObject }}>
@@ -73,13 +79,13 @@ export default function FooterNav({ currentRoute }: Props) {
         <NavSlot>
           <Pressable onPress={() => navGo('Recorder')} hitSlop={10}>
             {({ pressed }) => {
-              const isRecorderActive = currentRoute === 'Recorder';
+              const recorderActive = isActive('Recorder');
               return (
                 <View style={styles.recWrapper}>
                   <View
                     style={[
                       styles.recordBtn,
-                      isRecorderActive && styles.recordBtnActive,
+                      recorderActive && styles.recordBtnActive,
                       {
                         width: REC_BTN_CLAMP,
                         height: REC_BTN_CLAMP,
@@ -91,7 +97,7 @@ export default function FooterNav({ currentRoute }: Props) {
                     <Ionicons
                       name="videocam"
                       size={ICON_SIZE + 2}
-                      color={isRecorderActive ? '#ffffff' : '#0f172a'}
+                      color={recorderActive ? C.white : C.black}
                     />
                   </View>
                 </View>
@@ -99,8 +105,6 @@ export default function FooterNav({ currentRoute }: Props) {
             }}
           </Pressable>
         </NavSlot>
-
-
 
         {/* 4. Topics */}
         <NavSlot>
@@ -154,7 +158,7 @@ function TabButton({
       <Ionicons
         name={active ? iconActive : iconInactive}
         size={iconSize}
-        color={active ? '#fff' : '#cbd5e1'}
+        color={active ? C.white : C.label}
       />
       <Text style={[styles.label, active && styles.labelActive]}>{label}</Text>
     </Pressable>
@@ -166,9 +170,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0, right: 0, bottom: 0,
     minHeight: FOOTER_BAR_HEIGHT,
-    backgroundColor: 'rgba(15, 23, 42, 0.94)',
+    backgroundColor: C.bgGlass,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(148,163,184,0.25)',
+    borderTopColor: C.border,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -182,11 +186,11 @@ const styles = StyleSheet.create({
   },
 
   tab: { alignItems: 'center', justifyContent: 'center' },
-  label: { color: '#cbd5e1', fontSize: 12, fontWeight: '600', marginTop: 2, textAlign: 'center' },
-  labelActive: { color: '#fff' },
+  label: { color: C.label, fontSize: 12, fontWeight: '600', marginTop: 2, textAlign: 'center' },
+  labelActive: { color: C.white },
 
   recordBtn: {
-    backgroundColor: '#fff',
+    backgroundColor: C.white,
     borderWidth: 2,
     borderColor: '#e2e8f0',
     alignItems: 'center',
@@ -199,11 +203,8 @@ const styles = StyleSheet.create({
   },
 
   recordBtnActive: {
-    backgroundColor: '#ef4444',   // red circle when active
-    borderColor: '#fca5a5',       // softer red border
+    backgroundColor: C.danger,
+    borderColor: '#fca5a5',
   },
-  recWrapper: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  recWrapper: { alignItems: 'center', justifyContent: 'center' },
 });

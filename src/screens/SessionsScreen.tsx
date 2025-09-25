@@ -64,6 +64,22 @@ type MobileSession = {
   leaderboard_info?: any | null;  
 };
 
+
+type IngestItem = {
+  id: string;
+  status: string;
+  client_session_id: string;
+  mobile_session_id?: string | null;
+  created_at?: string | null;
+};
+const bucketStatus = (raw?: string): 'completed' | 'processing' | 'failed' => {
+  const s = (raw || '').toLowerCase();
+  if (['finalized','completed','done','success','ready'].includes(s)) return 'completed';
+  if (['failed','error'].includes(s)) return 'failed';
+  return 'processing';
+};
+
+
 const METRIC_KEYS: { key: string; label: string }[] = [
   { key: 'reinforced_engagement', label: 'Engaged' },
   { key: 'content_relevance',     label: 'Relevance' },
@@ -341,10 +357,7 @@ export default function SessionsScreen() {
   });
 
 
-
-
-
-
+ 
 
 
 
@@ -444,6 +457,99 @@ export default function SessionsScreen() {
   const showSummary = selectedMetric == null;
   const SelectedPanel =
     (selectedMetric && PANEL_REGISTRY[selectedMetric as PanelKey]) || null;
+
+
+
+
+  // ---- fetch ingests (only when picker is open) ----
+  const fetchIngests = React.useCallback(async (): Promise<IngestItem[]> => {
+    const res = await fetchWithAuth(`${API_BASE}/mobile/ingests?order=newest&limit=100`);
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      throw new Error(`Failed to load ingests: ${res.status} ${txt}`);
+    }
+    const j = await res.json();
+    const items = j?.items;
+    return Array.isArray(items) ? items : [];
+  }, [fetchWithAuth]);
+
+  const {
+    data: ingests = [],
+    isFetching: isFetchingIngests,
+    refetch: refetchIngests,
+  } = useQuery({
+    queryKey: ['mobile-ingests', 'list'],
+    queryFn: fetchIngests,
+    enabled: isFocused && pickerOpen,   // ✅ only when picker is open & screen focused
+    // no refetchInterval here
+    staleTime: 5_000,                   // small cache so closing/reopening still refreshes
+    gcTime: 300_000,
+  });
+
+  // When the picker opens, force a fresh pull once
+  useEffect(() => {
+    if (pickerOpen) {
+      refetchIngests();
+    }
+  }, [pickerOpen, refetchIngests]);
+
+
+
+
+  // ---- NEW: normalize for the picker (merge sessions + ingests) ----
+  type PickerRow = {
+    id: string;                  // what the picker needs for selection (+ our "ingest:" prefix when unlinked)
+    topic?: string | null;
+    status: string;              // raw; picker buckets it to "processing"/etc
+    created_at?: string | null;
+    leaderboard_tag?: string | null;
+    _kind: 'session' | 'ingest';
+    _selectable: boolean;        // disable press for ingests without a mobile_session_id
+  };
+
+  const pickerItems: PickerRow[] = React.useMemo(() => {
+    const sessions = (data ?? []) as MobileSession[];
+
+    const sessionRows: PickerRow[] = sessions.map(s => ({
+      id: s.id,
+      topic: s.topic,
+      status: s.status,
+      created_at: s.created_at ?? null,
+      leaderboard_tag: s.leaderboard_tag ?? null,
+      _kind: 'session',
+      _selectable: true,
+    }));
+
+    const ingestRows: PickerRow[] = ingests.map(i => {
+      const selectable = !!i.mobile_session_id; // only navigable when a session exists
+      return {
+        id: selectable ? (i.mobile_session_id as string) : `ingest:${i.client_session_id}`,
+        topic: 'Upload / Analysis', // optional: you can enrich this if you store a topic in metadata
+        status: i.status,           // picker will bucket this to "processing" for created/analyzing/etc
+        created_at: i.created_at ?? null,
+        leaderboard_tag: null,
+        _kind: 'ingest',
+        _selectable: selectable,
+      };
+    });
+
+    // Merge & de-dupe (prefer the session entry if both exist)
+    const byId = new Map<string, PickerRow>();
+    for (const r of [...ingestRows, ...sessionRows]) {
+      if (!byId.has(r.id) || byId.get(r.id)!._kind === 'ingest') {
+        byId.set(r.id, r);
+      }
+    }
+
+    // sort newest first (modal can also re-sort, but this makes the initial list nice)
+    return Array.from(byId.values()).sort((a, b) => {
+      const da = new Date(a.created_at || 0).getTime();
+      const db = new Date(b.created_at || 0).getTime();
+      return db - da;
+    });
+  }, [data, ingests]);
+
+
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -560,13 +666,23 @@ export default function SessionsScreen() {
       </GestureDetector>
 
       {/* Modals */}
+
+
+      
       <SessionPickerModal
         visible={pickerOpen}
-        serverDriven
-        items={(data ?? []) as any}
+        serverDriven={false}              
+        items={pickerItems as any}         
         currentId={sourceSession?.id}
         onClose={() => setPickerOpen(false)}
-        onSelect={(id) => setSelectedSessionId(id)}
+        onSelect={(id) => {
+          // prevent selecting “pure ingest” rows without a session
+          if (id.startsWith('ingest:')) {
+            Alert.alert('Processing', 'This upload is still processing. Try again shortly.');
+            return;
+          }
+          setSelectedSessionId(id);
+        }}
       />
 
       <RatingReportModal

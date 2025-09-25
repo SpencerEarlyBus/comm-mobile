@@ -1,31 +1,25 @@
 {
-  "cli": { "version": ">= 11.0.0" },
+  "cli": {
+    "version": ">= 11.0.0",
+    "appVersionSource": "remote"
+  },
   "build": {
     "development": {
+      "environment": "development",
       "distribution": "internal",
       "channel": "development",
-      "developmentClient": true,
-      "env": {
-        "EXPO_PUBLIC_API_BASE": "https://<your-dev>.up.railway.app"
-      },
-      "version": { "source": "local" }
+      "developmentClient": true
     },
     "preview": {
+      "environment": "preview",
       "distribution": "internal",
       "channel": "preview",
-      "env": {
-        "EXPO_PUBLIC_API_BASE": "https://<your-staging>.up.railway.app"
-      },
-      "autoIncrement": true,
-      "version": { "source": "local" }
+      "autoIncrement": true
     },
     "production": {
+      "environment": "production",
       "channel": "production",
-      "env": {
-        "EXPO_PUBLIC_API_BASE": "https://<your-prod>.up.railway.app"
-      },
-      "autoIncrement": true,
-      "version": { "source": "local" }
+      "autoIncrement": true
     }
   }
 }

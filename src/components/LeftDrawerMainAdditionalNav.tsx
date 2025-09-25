@@ -110,7 +110,7 @@ export default function LeftDrawerPlaceholder({ onClose }: Props) {
     setUrlError(null);
     try {
       const res = await fetch(
-        `${API_BASE}/media/public_presigned_url?key=${encodeURIComponent('frontend_media/Project_Vid_1.mp4')}`
+        `${API_BASE}/media/public_presigned_url?key=${encodeURIComponent('frontend_media/lectaura_introduction.mp4')}`
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -179,7 +179,7 @@ export default function LeftDrawerPlaceholder({ onClose }: Props) {
               <Text style={styles.badge}>Watch</Text>
             </Pressable>
 
-            {/* --- NEW: Case study PDF → generate questions --- */}
+            {/* --- NEW: Case study PDF → generate questions --- 
             <Pressable
               onPress={() => { setQOpen(true); runDocQuestions(); }}
               style={({ pressed }) => [styles.listItem, pressed && styles.listItemPressed]}
@@ -188,7 +188,7 @@ export default function LeftDrawerPlaceholder({ onClose }: Props) {
               <Text style={styles.listItemText}>• PDF</Text>
               <Text style={styles.badge}>Questions</Text>
             </Pressable>
-
+            */}
             {/* placeholders */}
             <Pressable disabled style={[styles.listItem, { opacity: 0.6 }]}>
               <Text style={styles.listItemText}>• Dials & Scores</Text>

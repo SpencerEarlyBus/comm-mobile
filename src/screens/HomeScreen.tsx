@@ -6,7 +6,6 @@ import {
   Image,
   Pressable,
   TextInput,
-  Button,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -21,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/MobileAuthContext';
 import { useNavigation } from '@react-navigation/native';
+import { C, S, R } from '../theme/tokens';
 
 type Mode = 'login' | 'signup';
 
@@ -100,10 +100,10 @@ export default function HomeScreen() {
   const submit = mode === 'login' ? onLogin : onSignup;
 
   return (
-    <View style={styles.root}>
-      {/* Gradient BG */}
+    <View style={[styles.root, { backgroundColor: C.bg }]}>
+      {/* Subtle dark/blue gradient */}
       <LinearGradient
-        colors={['#0ea5e9', '#6366f1', '#8b5cf6']}
+        colors={[C.bg, C.panelBg]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFillObject}
@@ -114,7 +114,6 @@ export default function HomeScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 48 + insets.top : 0}
       >
-        {/* tap anywhere outside to dismiss */}
         <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
           <ScrollView
             contentContainerStyle={[styles.scroll, { paddingTop: 48 + insets.top, paddingBottom: 24 + insets.bottom }]}
@@ -123,13 +122,10 @@ export default function HomeScreen() {
           >
             <View style={styles.container}>
               <Image
-                source={require('../../assets/heading.png')}
+                source={require('../../assets/Lectaura_White.png')}
                 resizeMode="contain"
                 style={styles.logo}
               />
-              <Text style={styles.hero}>
-                Measure, improve, and showcase your communication performance.
-              </Text>
 
               {/* Card */}
               <View style={styles.card}>
@@ -196,7 +192,7 @@ export default function HomeScreen() {
                           <TextInput
                             ref={usernameRef}
                             placeholder="Username (optional)"
-                            placeholderTextColor="rgba(255,255,255,0.8)"
+                            placeholderTextColor={C.subtext}
                             value={username}
                             onChangeText={setUsername}
                             autoCapitalize="none"
@@ -214,7 +210,7 @@ export default function HomeScreen() {
                       <TextInput
                         ref={emailRef}
                         placeholder="Email"
-                        placeholderTextColor="rgba(255,255,255,0.8)"
+                        placeholderTextColor={C.subtext}
                         value={email}
                         onChangeText={setEmail}
                         keyboardType="email-address"
@@ -234,7 +230,7 @@ export default function HomeScreen() {
                         <TextInput
                           ref={passwordRef}
                           placeholder="Password"
-                          placeholderTextColor="rgba(255,255,255,0.8)"
+                          placeholderTextColor={C.subtext}
                           value={password}
                           onChangeText={setPassword}
                           secureTextEntry={!showPwd}
@@ -262,11 +258,11 @@ export default function HomeScreen() {
                       {/* Submit + spinner */}
                       {busy ? (
                         <View style={styles.spinnerWrap}>
-                          <ActivityIndicator color="#fff" />
+                          <ActivityIndicator color={C.white} />
                         </View>
                       ) : (
-                        <Button
-                          title={mode === 'login' ? 'Log in' : 'Sign up'}
+                        <PrimaryButton
+                          label={mode === 'login' ? 'Log in' : 'Sign up'}
                           onPress={submit}
                           disabled={busy}
                         />
@@ -280,11 +276,6 @@ export default function HomeScreen() {
                   </>
                 )}
               </View>
-
-              {/* Footer */}
-              <Text style={styles.footer}>
-                © {String(new Date().getFullYear())} Comm
-              </Text>
             </View>
           </ScrollView>
         </TouchableWithoutFeedback>
@@ -316,9 +307,17 @@ function TabButton({
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.tabBtn, active ? styles.tabBtnActive : styles.tabBtnInactive]}
+      style={[
+        styles.tabBtn,
+        active ? styles.tabBtnActive : styles.tabBtnInactive,
+      ]}
     >
-      <Text style={[styles.tabText, active ? styles.tabTextActive : styles.tabTextInactive]}>
+      <Text
+        style={[
+          styles.tabText,
+          active ? styles.tabTextActive : styles.tabTextInactive,
+        ]}
+      >
         {label}
       </Text>
     </Pressable>
@@ -383,35 +382,34 @@ const styles = StyleSheet.create({
   },
   container: { width: '100%', alignItems: 'center' },
   logo: { width: '85%', height: 120, marginBottom: 12 },
-  hero: { textAlign: 'center', color: 'white', fontSize: 18, opacity: 0.9 },
 
   card: {
     marginTop: 28,
     width: '100%',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderColor: 'rgba(255,255,255,0.25)',
+    backgroundColor: C.panelBg,
+    borderColor: C.border,
     borderWidth: 1,
     padding: 18,
-    borderRadius: 20,
+    borderRadius: R.sheet,
   },
-  cardText: { color: 'white', fontSize: 16 },
-  bold: { fontWeight: '700', color: 'white' },
+  cardText: { color: C.text, fontSize: 16 },
+  bold: { fontWeight: '700', color: C.text },
 
   tabsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  tabBtn: { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center' },
-  tabBtnActive: { backgroundColor: 'white' },
-  tabBtnInactive: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)' },
+  tabBtn: { flex: 1, paddingVertical: 10, borderRadius: S.lg, alignItems: 'center' },
+  tabBtnActive: { backgroundColor: C.white },
+  tabBtnInactive: { borderWidth: 1, borderColor: C.border },
   tabText: { fontWeight: '700' },
-  tabTextActive: { color: '#0f172a' },
-  tabTextInactive: { color: 'white' },
+  tabTextActive: { color: C.black },
+  tabTextInactive: { color: C.text },
 
   input: {
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.35)',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    color: 'white',
+    borderColor: C.border,
+    backgroundColor: 'rgba(16,24,39,0.6)', // translucent on panel
+    color: C.text,
     padding: 12,
-    borderRadius: 12,
+    borderRadius: S.lg,
   },
 
   pwdRow: { flexDirection: 'row', alignItems: 'center' },
@@ -421,46 +419,44 @@ const styles = StyleSheet.create({
     right: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 10,
+    borderRadius: S.md,
   },
-  eyeBtnPressed: { backgroundColor: 'rgba(255,255,255,0.12)' },
-  eyeText: { color: 'white', fontWeight: '600' },
+  eyeBtnPressed: { backgroundColor: 'rgba(148,163,184,0.15)' },
+  eyeText: { color: C.text, fontWeight: '600' },
 
   primaryBtn: {
     paddingVertical: 14,
-    borderRadius: 16,
-    backgroundColor: 'white',
+    borderRadius: S.xl,
+    backgroundColor: C.white,
     alignItems: 'center',
   },
-  primaryBtnPressed: { backgroundColor: 'rgba(255,255,255,0.75)' },
-  primaryText: { color: '#0f172a', fontWeight: '700', fontSize: 16 },
+  primaryBtnPressed: { backgroundColor: 'rgba(255,255,255,0.85)' },
+  primaryText: { color: C.black, fontWeight: '700', fontSize: 16 },
 
   secondaryBtn: {
     paddingVertical: 14,
-    borderRadius: 16,
+    borderRadius: S.xl,
     borderWidth: 2,
-    borderColor: 'white',
+    borderColor: C.text,
     backgroundColor: 'transparent',
     alignItems: 'center',
   },
-  secondaryBtnPressed: { backgroundColor: 'rgba(255,255,255,0.12)' },
-  secondaryText: { color: 'white', fontWeight: '700', fontSize: 16 },
+  secondaryBtnPressed: { backgroundColor: 'rgba(148,163,184,0.15)' },
+  secondaryText: { color: C.text, fontWeight: '700', fontSize: 16 },
 
   spinnerWrap: { paddingVertical: 8, alignItems: 'center' },
 
   errorText: {
-    color: '#fecaca',
+    color: C.text,
     backgroundColor: 'rgba(239, 68, 68, 0.18)',
-    borderColor: 'rgba(239, 68, 68, 0.35)',
+    borderColor: C.danger,
     borderWidth: 1,
     paddingVertical: 8,
     paddingHorizontal: 10,
-    borderRadius: 10,
+    borderRadius: S.md,
   },
 
-  hintText: { color: 'rgba(255,255,255,0.75)', fontSize: 12, textAlign: 'center' },
-
-  footer: { marginTop: 24, color: 'white', opacity: 0.8 },
+  hintText: { color: C.subtext, fontSize: 12, textAlign: 'center' },
 
   // spacers
   sp10: { height: 10 },
@@ -469,12 +465,12 @@ const styles = StyleSheet.create({
 
   // iOS accessory
   accessoryBar: {
-    backgroundColor: '#f8fafc',
+    backgroundColor: C.headerGlass,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e5e7eb',
+    borderColor: C.border,
     padding: 8,
     alignItems: 'flex-end',
   },
   doneBtn: { paddingHorizontal: 12, paddingVertical: 8 },
-  doneText: { color: '#2563eb', fontWeight: '600' },
+  doneText: { color: C.accent, fontWeight: '600' },
 });

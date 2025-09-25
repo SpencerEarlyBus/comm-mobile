@@ -4,30 +4,8 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 export default ({ config }: ConfigContext): ExpoConfig => {
   const apiBase = process.env.EXPO_PUBLIC_API_BASE ?? '';
 
-
-  let ats: Record<string, any> = {};
-  if (apiBase.startsWith('http://')) {
-    try {
-      const { hostname } = new URL(apiBase);
-      ats = {
-        NSAppTransportSecurity: {
-          NSExceptionDomains: {
-            [hostname]: {
-              NSTemporaryExceptionAllowsInsecureHTTPLoads: true,
-              NSIncludesSubdomains: true,
-            },
-          },
-        },
-      };
-    } catch {
-      // Fallback (broad) if url parsing fails — fine for dev, remove for prod
-      ats = { NSAppTransportSecurity: { NSAllowsArbitraryLoads: true } };
-    }
-  }
-
   return {
     ...config,
-
     name: 'Comm Mobile',
     slug: 'comm-mobile',
     scheme: 'comm',
@@ -39,14 +17,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     userInterfaceStyle: 'light',
     newArchEnabled: true,
 
-    splash: {
-      image: './assets/splash-icon.png',
-      resizeMode: 'contain',
-      backgroundColor: '#ffffff',
-    },
+    splash: { image: './assets/splash-icon.png', resizeMode: 'contain', backgroundColor: '#ffffff' },
 
     ios: {
-      bundleIdentifier: 'com.yourco.comm', // ← set your real bundle id
+      bundleIdentifier: 'com.yourco.comm',
       buildNumber: '1',
       supportsTablet: true,
       infoPlist: {
@@ -54,20 +28,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         NSMicrophoneUsageDescription: 'We use the microphone to capture your audio.',
         NSPhotoLibraryUsageDescription: 'We access your photo library when you pick media.',
         NSPhotoLibraryAddUsageDescription: 'We save rendered media to your Photo Library.',
-        ITSAppUsesNonExemptEncryption: false, // ← EAS requested this
-        ...ats, // ← only present if apiBase is http://
+        ITSAppUsesNonExemptEncryption: false,
       },
     },
 
     android: {
       package: 'com.yourco.comm',
-      adaptiveIcon: {
-        foregroundImage: './assets/adaptive-icon.png',
-        backgroundColor: '#ffffff',
-      },
+      adaptiveIcon: { foregroundImage: './assets/adaptive-icon.png', backgroundColor: '#ffffff' },
       edgeToEdgeEnabled: true,
-      // Note: If you ever need cleartext (http://) on Android 9+, you’d set usesCleartextTraffic
-      // via a build-properties plugin. Best to keep everything HTTPS instead.
     },
 
     web: { favicon: './assets/favicon.png' },
@@ -77,7 +45,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       apiBase,
       eas: {
         ...(config.extra?.eas ?? {}),
-        projectId: '320404f1-d9e6-4194-a056-722e93498ab9', // your EAS project ID
+        projectId: '320404f1-d9e6-4194-a056-722e93498ab9',
       },
     },
 
@@ -88,10 +56,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       'expo-image-picker',
       'expo-file-system',
       'expo-video',
+      'expo-updates',
     ],
 
+    // ⬇️ Required for EAS Update (the CLI tried to add this for you)
     updates: {
-      requestHeaders: { 'expo-channel-name': 'production' },
+      url: 'https://u.expo.dev/320404f1-d9e6-4194-a056-722e93498ab9',
+      // You don't need requestHeaders for channels with EAS Update.
+      // Build profile's "channel" in eas.json defines which updates the binary will pull.
     },
   };
 };

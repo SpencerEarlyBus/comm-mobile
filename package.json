@@ -35,7 +35,8 @@
     "expo-haptics": "~14.1.4",
     "react-native-reanimated": "~3.17.4",
     "react-native-gesture-handler": "~2.24.0",
-    "expo-dev-client": "~5.2.4"
+    "expo-dev-client": "~5.2.4",
+    "expo-updates": "~0.28.17"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
