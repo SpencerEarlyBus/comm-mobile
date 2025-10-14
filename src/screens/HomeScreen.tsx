@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/MobileAuthContext';
 import { useNavigation } from '@react-navigation/native';
 import { C, S, R } from '../theme/tokens';
+import * as AppleAuthentication from "expo-apple-authentication";
 
 type Mode = 'login' | 'signup';
 
@@ -34,6 +35,8 @@ export default function HomeScreen() {
     loginWithPassword,
     signupWithPassword,
     logout,
+    loginWithApple,
+    quickLoginWithBiometric,
   } = useAuth() as any;
 
   const [mode, setMode] = useState<Mode>('login');
@@ -97,6 +100,44 @@ export default function HomeScreen() {
     }
   };
 
+
+  const onApple = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      const ok = await loginWithApple();
+      if (ok) {
+        nav.reset({ index: 0, routes: [{ name: 'Sessions' }] });
+      } else {
+        setError('Apple sign-in failed. Try again or use email.');
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Apple sign-in failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onBiometric = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      const ok = await quickLoginWithBiometric();
+      if (ok) {
+        nav.reset({ index: 0, routes: [{ name: 'Sessions' }] });
+      } else {
+        setError('Biometric unlock unavailable on this device.');
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Biometric unlock failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const BtnType = AppleAuthentication.AppleAuthenticationButtonType;
+  const appleType = (mode === 'signup' && (BtnType as any).SIGN_UP) ? BtnType.SIGN_UP : BtnType.SIGN_IN;
+
   const submit = mode === 'login' ? onLogin : onSignup;
 
   return (
@@ -127,155 +168,169 @@ export default function HomeScreen() {
                 style={styles.logo}
               />
 
-              {/* Card */}
-              <View style={styles.card}>
-                {authReady && isAuthenticated ? (
-                  <>
-                    <Text style={styles.cardText}>
-                      Signed in as <Text style={styles.bold}>{user?.email}</Text>
-                    </Text>
-                    <View style={styles.sp12} />
-                    <PrimaryButton
-                      label="Continue to Sessions"
-                      onPress={() => nav.navigate('Sessions')}
-                      disabled={busy}
-                    />
-                    <View style={styles.sp10} />
-                    <SecondaryButton
-                      label="Log out"
-                      onPress={async () => {
-                        setBusy(true);
-                        try {
-                          await logout();
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                      disabled={busy}
-                    />
-                  </>
-                ) : (
-                  <>
-                    {/* Tabs */}
-                    <View style={styles.tabsRow}>
-                      <TabButton
-                        active={mode === 'login'}
-                        label="Log in"
-                        onPress={() => {
-                          setMode('login');
-                          setError(null);
-                        }}
-                      />
-                      <View style={styles.spH8} />
-                      <TabButton
-                        active={mode === 'signup'}
-                        label="Sign up"
-                        onPress={() => {
-                          setMode('signup');
-                          setError(null);
-                        }}
-                      />
-                    </View>
+{/* Card */}
+<View style={styles.card}>
+  {authReady && isAuthenticated ? (
+    <>
+      <Text style={styles.cardText}>
+        Signed in as <Text style={styles.bold}>{user?.email}</Text>
+      </Text>
+      <View style={styles.sp12} />
+      <PrimaryButton
+        label="Continue to Sessions"
+        onPress={() => nav.navigate('Sessions')}
+        disabled={busy}
+      />
+      <View style={styles.sp10} />
+      <SecondaryButton
+        label="Log out"
+        onPress={async () => {
+          setBusy(true);
+          try { await logout(); } finally { setBusy(false); }
+        }}
+        disabled={busy}
+      />
+    </>
+  ) : (
+    <>
+      {/* Provider buttons FIRST */}
+      <View style={styles.providerRow}>
+        {Platform.OS === 'ios' && (
+          <View
+            style={[styles.appleWrap, busy && { opacity: 0.6 }]}
+            pointerEvents={busy ? 'none' : 'auto'}
+          >
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={appleType}
+              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+              cornerRadius={8}
+              style={{ width: '100%', height: 44 }}
+              onPress={() => { if (!busy) onApple(); }}
+              accessibilityState={{ disabled: busy }}
+            />
+          </View>
+        )}
+      </View>
 
-                    {/* Error */}
-                    {!!error && (
-                      <>
-                        <Text style={styles.errorText}>{error}</Text>
-                        <View style={styles.sp10} />
-                      </>
-                    )}
+      {/* Separator */}
+      <View style={styles.separator}>
+        <View style={styles.sepLine} />
+        <Text style={styles.sepText}>or continue with email</Text>
+        <View style={styles.sepLine} />
+      </View>
 
-                    {/* Form */}
-                    <View>
-                      {mode === 'signup' && (
-                        <>
-                          <TextInput
-                            ref={usernameRef}
-                            placeholder="Username (optional)"
-                            placeholderTextColor={C.subtext}
-                            value={username}
-                            onChangeText={setUsername}
-                            autoCapitalize="none"
-                            autoCorrect={false}
-                            textContentType="username"
-                            style={styles.input}
-                            inputAccessoryViewID={Platform.OS === 'ios' ? accessoryId : undefined}
-                            returnKeyType="next"
-                            blurOnSubmit={false}
-                            onSubmitEditing={() => emailRef.current?.focus()}
-                          />
-                          <View style={styles.sp10} />
-                        </>
-                      )}
-                      <TextInput
-                        ref={emailRef}
-                        placeholder="Email"
-                        placeholderTextColor={C.subtext}
-                        value={email}
-                        onChangeText={setEmail}
-                        keyboardType="email-address"
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        textContentType="emailAddress"
-                        style={styles.input}
-                        inputAccessoryViewID={Platform.OS === 'ios' ? accessoryId : undefined}
-                        returnKeyType="next"
-                        blurOnSubmit={false}
-                        onSubmitEditing={() => passwordRef.current?.focus()}
-                      />
-                      <View style={styles.sp10} />
+      {/* Tabs */}
+      <View style={styles.tabsRow}>
+        <TabButton
+          active={mode === 'login'}
+          label="Log in"
+          onPress={() => { setMode('login'); setError(null); }}
+        />
+        <View style={styles.spH8} />
+        <TabButton
+          active={mode === 'signup'}
+          label="Sign up"
+          onPress={() => { setMode('signup'); setError(null); }}
+        />
+      </View>
 
-                      {/* Password field with show/hide */}
-                      <View style={styles.pwdRow}>
-                        <TextInput
-                          ref={passwordRef}
-                          placeholder="Password"
-                          placeholderTextColor={C.subtext}
-                          value={password}
-                          onChangeText={setPassword}
-                          secureTextEntry={!showPwd}
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                          textContentType="password"
-                          style={[styles.input, styles.pwdInput]}
-                          inputAccessoryViewID={Platform.OS === 'ios' ? accessoryId : undefined}
-                          returnKeyType="done"
-                          blurOnSubmit
-                          onSubmitEditing={submit}
-                        />
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={showPwd ? 'Hide password' : 'Show password'}
-                          onPress={() => setShowPwd((s) => !s)}
-                          style={({ pressed }) => [styles.eyeBtn, pressed && styles.eyeBtnPressed]}
-                        >
-                          <Text style={styles.eyeText}>{showPwd ? 'Hide' : 'Show'}</Text>
-                        </Pressable>
-                      </View>
+      {/* Error */}
+      {!!error && (
+        <>
+          <Text style={styles.errorText}>{error}</Text>
+          <View style={styles.sp10} />
+        </>
+      )}
 
-                      <View style={styles.sp12} />
+      {/* Email/password form */}
+      <View>
+        {mode === 'signup' && (
+          <>
+            <TextInput
+              ref={usernameRef}
+              placeholder="Username (optional)"
+              placeholderTextColor={C.subtext}
+              value={username}
+              onChangeText={setUsername}
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="username"
+              style={styles.input}
+              inputAccessoryViewID={Platform.OS === 'ios' ? accessoryId : undefined}
+              returnKeyType="next"
+              blurOnSubmit={false}
+              onSubmitEditing={() => emailRef.current?.focus()}
+            />
+            <View style={styles.sp10} />
+          </>
+        )}
 
-                      {/* Submit + spinner */}
-                      {busy ? (
-                        <View style={styles.spinnerWrap}>
-                          <ActivityIndicator color={C.white} />
-                        </View>
-                      ) : (
-                        <PrimaryButton
-                          label={mode === 'login' ? 'Log in' : 'Sign up'}
-                          onPress={submit}
-                          disabled={busy}
-                        />
-                      )}
+        <TextInput
+          ref={emailRef}
+          placeholder="Email"
+          placeholderTextColor={C.subtext}
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          textContentType="emailAddress"
+          style={styles.input}
+          inputAccessoryViewID={Platform.OS === 'ios' ? accessoryId : undefined}
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => passwordRef.current?.focus()}
+        />
+        <View style={styles.sp10} />
 
-                      <View style={styles.sp10} />
-                      <Text style={styles.hintText}>
-                        By continuing you agree to our Terms and Privacy Policy.
-                      </Text>
-                    </View>
-                  </>
-                )}
-              </View>
+        <View style={styles.pwdRow}>
+          <TextInput
+            ref={passwordRef}
+            placeholder="Password"
+            placeholderTextColor={C.subtext}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!showPwd}
+            autoCapitalize="none"
+            autoCorrect={false}
+            textContentType="password"
+            style={[styles.input, styles.pwdInput]}
+            inputAccessoryViewID={Platform.OS === 'ios' ? accessoryId : undefined}
+            returnKeyType="done"
+            blurOnSubmit
+            onSubmitEditing={mode === 'login' ? onLogin : onSignup}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={showPwd ? 'Hide password' : 'Show password'}
+            onPress={() => setShowPwd((s) => !s)}
+            style={({ pressed }) => [styles.eyeBtn, pressed && styles.eyeBtnPressed]}
+          >
+            <Text style={styles.eyeText}>{showPwd ? 'Hide' : 'Show'}</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.sp12} />
+
+        {busy ? (
+          <View style={styles.spinnerWrap}><ActivityIndicator color={C.white} /></View>
+        ) : (
+          <PrimaryButton
+            label={mode === 'login' ? 'Log in' : 'Sign up'}
+            onPress={mode === 'login' ? onLogin : onSignup}
+            disabled={busy}
+          />
+        )}
+
+        <View style={styles.sp10} />
+        <Text style={styles.hintText}>
+          By continuing you agree to our Terms and Privacy Policy.
+        </Text>
+      </View>
+    </>
+  )}
+</View>
+
             </View>
           </ScrollView>
         </TouchableWithoutFeedback>
@@ -473,4 +528,11 @@ const styles = StyleSheet.create({
   },
   doneBtn: { paddingHorizontal: 12, paddingVertical: 8 },
   doneText: { color: C.accent, fontWeight: '600' },
+
+  providerRow: { gap: 10, marginBottom: 12 },
+  separator: { flexDirection: 'row', alignItems: 'center', marginVertical: 12 },
+  sepLine: { flex: 1, height: 1, backgroundColor: C.border },
+  sepText: { marginHorizontal: 8, color: C.subtext, fontSize: 12 },
+  appleWrap: { width: '100%' },
+
 });

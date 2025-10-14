@@ -6,14 +6,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   return {
     ...config,
-    name: 'Comm Mobile',
+    name: 'Lectaura',
     slug: 'comm-mobile',
     scheme: 'comm',
     version: '1.0.0',
     runtimeVersion: { policy: 'appVersion' },
 
     orientation: 'portrait',
-    icon: './assets/icon.png',
+    icon: './assets/Lectaura_favio.png',
     userInterfaceStyle: 'light',
     newArchEnabled: true,
 
@@ -28,6 +28,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         NSMicrophoneUsageDescription: 'We use the microphone to capture your audio.',
         NSPhotoLibraryUsageDescription: 'We access your photo library when you pick media.',
         NSPhotoLibraryAddUsageDescription: 'We save rendered media to your Photo Library.',
+        NSFaceIDUsageDescription: 'Use Face ID to quickly and securely sign in.',
         ITSAppUsesNonExemptEncryption: false,
       },
     },
@@ -57,9 +58,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       'expo-file-system',
       'expo-video',
       'expo-updates',
+      'expo-apple-authentication',    
+      'expo-local-authentication',  
     ],
 
-    // ⬇️ Required for EAS Update (the CLI tried to add this for you)
     updates: {
       url: 'https://u.expo.dev/320404f1-d9e6-4194-a056-722e93498ab9',
       // You don't need requestHeaders for channels with EAS Update.
