@@ -13,7 +13,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     runtimeVersion: { policy: 'appVersion' },
 
     orientation: 'portrait',
-    icon: './assets/Lectaura_favio.png',
+    icon: './assets/lectaura_favicon.png',
     userInterfaceStyle: 'light',
     newArchEnabled: true,
 

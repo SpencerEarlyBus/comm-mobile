@@ -10,6 +10,7 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
   Modal,
+  Alert,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
@@ -25,6 +26,17 @@ import { S } from '../theme/spacing';
 import { useAuth } from '../context/MobileAuthContext';
 import MetricDial from '../components/MetricDial';
 import { Ionicons } from '@expo/vector-icons';
+
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLeftDrawer } from '../features/leftDrawer';
+import { makeDrawerStyles } from '../features/drawerStyles';
+import { GestureDetector } from 'react-native-gesture-handler';
+import Animated from 'react-native-reanimated';
+import LeftDrawerPlaceholder from '../components/LeftDrawerMainAdditionalNav';
+
+
+const HEADER_ROW_H = 56;
+const DRAWER_WIDTH = 280;
 
 
 type MyRating = {
@@ -116,6 +128,23 @@ export default function LeaderboardScreen() {
     NUM: 72,    // rating / avg / sessions
     CHEV: 48,   // trailing chevron
   } as const;
+
+
+  //hamburger stuff 
+  const insets = useSafeAreaInsets();
+  const headerHeight = (insets.top || 0) + HEADER_ROW_H;
+
+  const {
+    drawerOpen, openDrawer, closeDrawer,
+    edgeSwipe, drawerDrag, drawerStyle, overlayStyle
+  } = useLeftDrawer({ headerHeight, drawerWidth: DRAWER_WIDTH });
+
+  const drawerStyles = makeDrawerStyles({
+    headerHeight,
+    drawerWidth: DRAWER_WIDTH,
+    bgColor: C.bg,
+    borderColor: C.border,
+  });
 
 
   // Modal state (metrics-only)
@@ -315,12 +344,15 @@ export default function LeaderboardScreen() {
 
       <HeaderBar
         title="Leaderboards"
-        onPressNotifications={() => {}}
+        onPressMenu={openDrawer}     
+        onPressNotifications={() => Alert.alert('Notifications', 'Coming soon')}
         onPressStatus={() => {}}
         dark
       />
 
       {/* Sticky dial bar */}
+      <GestureDetector gesture={edgeSwipe}>
+      <View style={{ flex: 1 }}>
       <View style={[styles.dialsBar, scrolled && styles.dialsBarShadow]}>
         <ScrollView
           horizontal
@@ -557,14 +589,28 @@ export default function LeaderboardScreen() {
 
         </View>
       </Screen>
+      </View>
+      </GestureDetector>
 
-      {/* METRICS-ONLY MODAL */}
-      <MetricsOnlyModal
-        visible={!!detail}
-        onClose={() => setDetail(null)}
-        name={detail?.name ?? ''}
-        metrics={detail?.metrics ?? {}}
-      />
+    {drawerOpen && (
+      <Pressable onPress={closeDrawer} style={StyleSheet.absoluteFill} pointerEvents="auto">
+        <Animated.View style={[drawerStyles.overlay, overlayStyle]} />
+      </Pressable>
+    )}
+
+    <GestureDetector gesture={drawerDrag}>
+      <Animated.View style={[drawerStyles.drawer, drawerStyle]}>
+        <LeftDrawerPlaceholder onClose={closeDrawer} />
+      </Animated.View>
+    </GestureDetector>
+
+    {/* */}
+    <MetricsOnlyModal
+      visible={!!detail}
+      onClose={() => setDetail(null)}
+      name={detail?.name ?? ''}
+      metrics={detail?.metrics ?? {}}
+    />
     </View>
   );
 }

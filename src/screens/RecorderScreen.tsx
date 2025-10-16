@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   View, Button, Alert, Linking, AppState, InteractionManager, Platform,
-  ScrollView, StyleSheet, Modal, Text, TouchableOpacity
+  ScrollView, StyleSheet, Modal, Text, TouchableOpacity, Pressable
 } from 'react-native';
 import {
   useFocusEffect, useNavigation, useRoute, CommonActions, RouteProp
@@ -19,7 +19,21 @@ import CameraSetupPanel from '../components/CameraSetupUser';
 import RecordingOverlay from '../components/RecordingOverlay';
 import TopicCountdownPanel from '../components/TopicCountdownPanel';
 import { COLORS } from '../theme/colors';
+import { COLORS as C } from '../theme/colors';
 import type { RootStackParamList } from '../navigation/navRef';
+
+
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLeftDrawer } from '../features/leftDrawer';
+import { makeDrawerStyles } from '../features/drawerStyles';
+import { GestureDetector } from 'react-native-gesture-handler';
+import Animated from 'react-native-reanimated';
+import LeftDrawerPlaceholder from '../components/LeftDrawerMainAdditionalNav';
+
+
+const HEADER_ROW_H = 56;
+const DRAWER_WIDTH = 280;
+
 
 type Status = 'granted' | 'denied' | 'undetermined' | 'restricted' | 'unknown';
 
@@ -69,6 +83,24 @@ export default function RecorderScreen() {
     if (postStopResolveTimerRef.current) { clearTimeout(postStopResolveTimerRef.current); postStopResolveTimerRef.current = null; }
     if (postStopNudgeRef.current) { clearTimeout(postStopNudgeRef.current); postStopNudgeRef.current = null; }
   };
+
+
+  //hamburger stuff 
+  const insets = useSafeAreaInsets();
+  const headerHeight = (insets.top || 0) + HEADER_ROW_H;
+
+  const {
+    drawerOpen, openDrawer, closeDrawer,
+    edgeSwipe, drawerDrag, drawerStyle, overlayStyle
+  } = useLeftDrawer({ headerHeight, drawerWidth: DRAWER_WIDTH });
+
+  const drawerStyles = makeDrawerStyles({
+    headerHeight,
+    drawerWidth: DRAWER_WIDTH,
+    bgColor: C.bg,
+    borderColor: C.border,
+  });
+
 
 
   // unique ids for timers (so logs can correlate)
@@ -610,6 +642,7 @@ export default function RecorderScreen() {
       <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
         <HeaderBar
           title="Record"
+          onPressMenu={openDrawer}  
           onPressNotifications={() => Alert.alert('Notifications', 'Coming soon')}
           onPressStatus={() => Alert.alert('Recorder', 'Recorder status')}
           dark
@@ -691,6 +724,11 @@ export default function RecorderScreen() {
           />
         </ScrollView>
       </View>
+
+
+
+
+
     );
   } else if (mode === 'preview') {
     content = (
@@ -726,12 +764,48 @@ export default function RecorderScreen() {
     );
   }
 
+
+
+
+  
   return (
     <View key={remountKey} style={{ flex: 1 }}>
-      {content}
+      {mode === 'setup' ? (
+        <>
+          {/* Edge-swipe to open drawer */}
+          <GestureDetector gesture={edgeSwipe}>
+            <View style={{ flex: 1 }}>
+              {content /* your setup branch with HeaderBar + ScrollView */}
+            </View>
+          </GestureDetector>
+
+          {/* Overlay + Drawer on top */}
+          {drawerOpen && (
+            <Pressable
+              onPress={closeDrawer}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="auto"
+            >
+              <Animated.View style={[drawerStyles.overlay, overlayStyle]} />
+            </Pressable>
+          )}
+
+          <GestureDetector gesture={drawerDrag}>
+            <Animated.View style={[drawerStyles.drawer, drawerStyle]}>
+              <LeftDrawerPlaceholder onClose={closeDrawer} />
+            </Animated.View>
+          </GestureDetector>
+        </>
+      ) : (
+        // non-setup modes (preview/calibrate/capture) render as-is, no drawer
+        content
+      )}
+
+      {/* Upload modal unchanged */}
       <UploadProgressModal visible={showUpload} pct={uploadPct} onCancel={abortAll} />
     </View>
   );
+
 }
 
 const styles = StyleSheet.create({

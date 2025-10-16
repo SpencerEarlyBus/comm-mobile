@@ -46,6 +46,8 @@ type Props = {
   serverDriven?: boolean;            // default true → use server search
   drawerWidthPct?: number;           // optional, default 0.9 (90% of screen)
   enableSwipeToClose?: boolean;      // optional, default true
+  headerHeight?: number;          // top offset (same as left drawer)
+  drawerWidthPx?: number; 
 };
 
 // 🚫 Removed "queued" from chips
@@ -60,6 +62,8 @@ export default function SessionPickerModal({
   serverDriven = true,
   drawerWidthPct = 0.9,
   enableSwipeToClose = true,
+  headerHeight,
+  drawerWidthPx,
 }: Props) {
 
 
@@ -84,8 +88,12 @@ export default function SessionPickerModal({
 
   // Respect header/footer
   const insets = useSafeAreaInsets();
-  const TOP_OFFSET = insets.top || 0;
-  const BOTTOM_OFFSET = (insets.bottom || 0) + FOOTER_BAR_HEIGHT + 6;
+  const TOP_OFFSET = (typeof headerHeight === 'number' ? headerHeight : (insets.top || 0));
+  // keep footer padding behavior
+  const BOTTOM_OFFSET = FOOTER_BAR_HEIGHT + 29;
+
+  // Keep list breathing room inside the sheet:
+  const CONTENT_BOTTOM_PAD = (insets.bottom || 0) + 12;
 
   const {
     data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isRefetching
@@ -130,7 +138,9 @@ export default function SessionPickerModal({
 
   // --- right drawer animation ---
   const { width } = useWindowDimensions();
-  const SHEET_W = Math.min(420, Math.round(width * drawerWidthPct));
+  const SHEET_W = typeof drawerWidthPx === 'number'
+    ? drawerWidthPx
+    : Math.min(420, Math.round(width * (drawerWidthPct ?? 0.9)));
   const anim = useRef(new Animated.Value(0)).current;      // 0=hidden, 1=shown
   const [mounted, setMounted] = useState(visible);         // keep Modal open during close animation
 
@@ -220,7 +230,7 @@ export default function SessionPickerModal({
           right: 0,
           top: TOP_OFFSET,
           bottom: BOTTOM_OFFSET,
-          backgroundColor: C.black,
+          backgroundColor: 'rgba(0,0,0,0.5)',
           opacity: backdropOpacity,
         }}
       />
@@ -339,7 +349,7 @@ export default function SessionPickerModal({
             data={dataRows}
             keyExtractor={(s) => s.id}
             ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-            contentContainerStyle={{ padding: S.md, paddingBottom: 12 }}
+            contentContainerStyle={{ padding: S.md, paddingBottom: CONTENT_BOTTOM_PAD }}
             onEndReachedThreshold={0.5}
             onEndReached={() => {
               if (serverDriven && hasNextPage && !isFetchingNextPage) fetchNextPage();
@@ -377,31 +387,11 @@ export default function SessionPickerModal({
                     <Text style={{ fontWeight: '700', color: C.text }} numberOfLines={1}>
                       {item.topic || 'Session'}
                     </Text>
-                    <Text style={{ textTransform: 'capitalize', color: C.subtext }}>
-                      {uiStatus}
-                    </Text>
                   </View>
 
                   <View style={{ marginTop: 4, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Text style={{ color: C.subtext }}>{fmt(item.created_at)}</Text>
 
-                    {/* optional pill for leaderboard tag */}
-                    {!!item.leaderboard_tag && (
-                      <View
-                        style={{
-                          paddingVertical: 2,
-                          paddingHorizontal: 8,
-                          borderRadius: 999,
-                          backgroundColor: C.panelBg,
-                          borderWidth: 1,
-                          borderColor: C.border,
-                        }}
-                      >
-                        <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>
-                          {item.leaderboard_tag}
-                        </Text>
-                      </View>
-                    )}
                   </View>
                 </Pressable>
               );

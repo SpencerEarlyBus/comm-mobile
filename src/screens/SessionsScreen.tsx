@@ -37,6 +37,7 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import LeftDrawerPlaceholder from '../components/LeftDrawerMainAdditionalNav';
+import { useWindowDimensions } from 'react-native';
 
 
 import Card from '../components/Card';
@@ -356,8 +357,22 @@ export default function SessionsScreen() {
     borderColor: C.border,
   });
 
-
- 
+  const { width, height } = useWindowDimensions();
+  // mirror the same footer calc we used in the modal
+  const FOOTER_PAD_BOTTOM = (insets.bottom || 10) + 6;
+  const FOOTER_PAD_TOP = 8;
+  const footerTotal = FOOTER_BAR_HEIGHT + FOOTER_PAD_TOP + FOOTER_PAD_BOTTOM;
+  const openPickerEdgeSwipe = Gesture.Pan()
+    .minDistance(18)
+    .failOffsetY([-12, 12])
+    .hitSlop({ left: -8 })
+    .onEnd((e) => {
+      'worklet';
+      // leftward drag from right edge
+      if (e.translationX < -24) {
+        runOnJS(setPickerOpen)(true);
+      }
+    });
 
 
 
@@ -568,7 +583,7 @@ export default function SessionsScreen() {
       />
 
       {/* CONTENT wrapped with edge-swipe — put ALL your content here */}
-      <GestureDetector gesture={edgeSwipe}>
+      <GestureDetector gesture={Gesture.Simultaneous(edgeSwipe)}>
         <View style={{ flex: 1 }}>
           {!hasSessions && !isFetching ? (
             <EmptyState bottomPad={bottomPad} />
@@ -613,6 +628,27 @@ export default function SessionsScreen() {
                 </ScrollView>
               </View>
 
+
+              {/* Right-edge swipe catcher (between header and footer) */}
+              <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+                <View
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: headerHeight,                  // below header
+                    bottom: FOOTER_BAR_HEIGHT,          // above footer (min height)
+                    width: 24,                          // edge width
+                  }}
+                  pointerEvents="auto"
+                >
+                  <GestureDetector gesture={openPickerEdgeSwipe}>
+                    <View style={{ flex: 1 }} />
+                  </GestureDetector>
+                </View>
+              </View>
+
+
+              
               {/* Scrollable body */}
               <View style={{ flex: 1 }}>
                 <ScrollView
@@ -669,21 +705,24 @@ export default function SessionsScreen() {
 
 
       
-      <SessionPickerModal
-        visible={pickerOpen}
-        serverDriven={false}              
-        items={pickerItems as any}         
-        currentId={sourceSession?.id}
-        onClose={() => setPickerOpen(false)}
-        onSelect={(id) => {
-          // prevent selecting “pure ingest” rows without a session
-          if (id.startsWith('ingest:')) {
-            Alert.alert('Processing', 'This upload is still processing. Try again shortly.');
-            return;
-          }
-          setSelectedSessionId(id);
-        }}
-      />
+    <SessionPickerModal
+      visible={pickerOpen}
+      serverDriven={false}
+      items={pickerItems as any}
+      currentId={sourceSession?.id}
+      onClose={() => setPickerOpen(false)}
+      onSelect={(id) => {
+        if (id.startsWith('ingest:')) {
+          Alert.alert('Processing', 'This upload is still processing. Try again shortly.');
+          return;
+        }
+        setSelectedSessionId(id);
+      }}
+
+      // NEW: make right-drawer match left-drawer sizing
+      headerHeight={headerHeight}         // = (insets.top || 0) + HEADER_ROW_H
+      drawerWidthPx={DRAWER_WIDTH+50}        // = 280
+    />
 
       <RatingReportModal
         visible={reportOpen}

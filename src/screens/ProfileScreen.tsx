@@ -1,12 +1,25 @@
 // src/screens/ProfileScreen.tsx
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Alert, } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/MobileAuthContext';
 import Screen from '../components/Screen';
 import HeaderBar from '../components/HeaderBar';
 import { COLORS } from '../theme/colors';
+import { COLORS as C} from '../theme/colors';
+
+
+import { useLeftDrawer } from '../features/leftDrawer';
+import { makeDrawerStyles } from '../features/drawerStyles';
+import { GestureDetector } from 'react-native-gesture-handler';
+import Animated from 'react-native-reanimated';
+import LeftDrawerPlaceholder from '../components/LeftDrawerMainAdditionalNav';
+
+
+const HEADER_ROW_H = 56;
+const DRAWER_WIDTH = 280;
+
 
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://your.backend.root';
 
@@ -67,6 +80,24 @@ export default function ProfileScreen() {
 
   const [followedTags, setFollowedTags] = useState<string[]>(followed_leaderboard_tags ?? []);
 
+
+  //hamburger stuff 
+  const headerHeight = (insets.top || 0) + HEADER_ROW_H;
+
+  const {
+    drawerOpen, openDrawer, closeDrawer,
+    edgeSwipe, drawerDrag, drawerStyle, overlayStyle
+  } = useLeftDrawer({ headerHeight, drawerWidth: DRAWER_WIDTH });
+
+  const drawerStyles = makeDrawerStyles({
+    headerHeight,
+    drawerWidth: DRAWER_WIDTH,
+    bgColor: C.bg,
+    borderColor: C.border,
+  });
+
+
+
   useEffect(() => {
     setFollowedTags(followed_leaderboard_tags ?? []);
   }, [followed_leaderboard_tags]);
@@ -99,9 +130,15 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
-      <HeaderBar title="Profile" onPressNotifications={() => {}} onPressStatus={() => {}} dark />
+      <HeaderBar title="Profile" 
+      onPressMenu={openDrawer}  
+      onPressNotifications={() => Alert.alert('Notifications', 'Coming soon')}
+      onPressStatus={() => {}} 
+      dark />
 
       {/* Let Screen own the ScrollView; single horizontal inset */}
+      <GestureDetector gesture={edgeSwipe}>
+      <View style={{ flex: 1 }}>
       <Screen
         scroll
         footerAware
@@ -183,6 +220,24 @@ export default function ProfileScreen() {
           <Text style={styles.logoutText}>Log out</Text>
         </Pressable>
       </Screen>
+      </View>
+      </GestureDetector>
+
+
+
+      {drawerOpen && (
+        <Pressable onPress={closeDrawer} style={StyleSheet.absoluteFill} pointerEvents="auto">
+          <Animated.View style={[drawerStyles.overlay, overlayStyle]} />
+        </Pressable>
+      )}
+
+      <GestureDetector gesture={drawerDrag}>
+        <Animated.View style={[drawerStyles.drawer, drawerStyle]}>
+          <LeftDrawerPlaceholder onClose={closeDrawer} />
+        </Animated.View>
+      </GestureDetector>
+
+
     </View>
   );
 }

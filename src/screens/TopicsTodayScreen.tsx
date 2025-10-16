@@ -25,6 +25,13 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 
+import { useLeftDrawer } from '../features/leftDrawer';
+import { makeDrawerStyles } from '../features/drawerStyles';
+import LeftDrawerPlaceholder from '../components/LeftDrawerMainAdditionalNav';
+
+
+
+
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://your.backend.root';
 
 type ListResponse = {
@@ -63,22 +70,87 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
 
   const [scope, setScope] = useState<Scope>('public');
 
-  // Drawer state
-  const drawerX = useSharedValue(-DRAWER_WIDTH);
-  const dragStartX = useSharedValue(0);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  // Drawer state (local filter state)
+  const filtersX = useSharedValue(-DRAWER_WIDTH);
+  const filtersStartX = useSharedValue(0);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const openDrawer = useCallback(() => {
-    setDrawerOpen(true);
-    drawerX.value = withTiming(0, { duration: 220 });
-  }, [drawerX]);
+  const openFilters = useCallback(() => {
+    setFiltersOpen(true);
+    filtersX.value = withTiming(0, { duration: 220 });
+  }, [filtersX]);
 
-  const closeDrawer = useCallback(() => {
-    drawerX.value = withTiming(-DRAWER_WIDTH, { duration: 200 }, (finished) => {
-      if (finished) runOnJS(setDrawerOpen)(false);
+  const closeFilters = useCallback(() => {
+    filtersX.value = withTiming(-DRAWER_WIDTH, { duration: 200 }, (finished) => {
+      if (finished) runOnJS(setFiltersOpen)(false);
     });
-  }, [drawerX]);
+  }, [filtersX]);
 
+  const filtersEdgeSwipe = Gesture.Pan()
+    .activeOffsetX([-14, 14])
+    .failOffsetY([-12, 12])
+    .onStart((e) => {
+      // keep this one BELOW HEADER and NOT at the very left edge to avoid conflict with global edge swipe
+      const fromLeftEdgeButInside = e.absoluteX >= 40;    // ← reserve 0–40px for global drawer
+      const belowHeader = e.absoluteY > headerTop;
+      if (!filtersOpen && !(fromLeftEdgeButInside && belowHeader)) return;
+      filtersStartX.value = filtersX.value;
+    })
+    .onUpdate((e) => {
+      const nextX = clamp(filtersStartX.value + e.translationX, -DRAWER_WIDTH, 0);
+      filtersX.value = nextX;
+    })
+    .onEnd((_e) => {
+      const shouldOpen = filtersX.value > -DRAWER_WIDTH * 0.6;
+      if (shouldOpen) runOnJS(openFilters)();
+      else runOnJS(closeFilters)();
+    });
+
+  const filtersDrag = Gesture.Pan()
+    .activeOffsetX([-14, 14])
+    .failOffsetY([-12, 12])
+    .onStart(() => { filtersStartX.value = filtersX.value; })
+    .onUpdate((e) => {
+      const nextX = clamp(filtersStartX.value + e.translationX, -DRAWER_WIDTH, 0);
+      filtersX.value = nextX;
+    })
+    .onEnd((_e) => {
+      const shouldOpen = filtersX.value > -DRAWER_WIDTH * 0.6;
+      if (shouldOpen) runOnJS(openFilters)();
+      else runOnJS(closeFilters)();
+    });
+
+  const filtersDrawerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: filtersX.value }],
+  }));
+
+  const filtersOverlayStyle = useAnimatedStyle(() => {
+    const openAmt = 1 - Math.max(0, Math.min(1, Math.abs(filtersX.value) / DRAWER_WIDTH));
+    return { opacity: withTiming(openAmt * 0.5, { duration: 120 }) };
+  });
+
+
+  const headerHeight = (insets.top || 0) + HEADER_H;
+
+  const {
+    drawerOpen: appDrawerOpen,
+    openDrawer: openAppDrawer,
+    closeDrawer: closeAppDrawer,
+    edgeSwipe: appEdgeSwipe,
+    drawerDrag: appDrawerDrag,
+    drawerStyle: appDrawerStyle,
+    overlayStyle: appOverlayStyle,
+  } = useLeftDrawer({ headerHeight, drawerWidth: DRAWER_WIDTH });
+
+  const appDrawerStyles = makeDrawerStyles({
+    headerHeight,
+    drawerWidth: DRAWER_WIDTH,
+    bgColor: COLORS.bg,
+    borderColor: COLORS.border,
+  });
+
+
+  
   // Data
   const canLoadMore = items.length < total;
 
@@ -153,50 +225,7 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
     loadFollows();
   }, [loadFollows]);
 
-  // Gestures (horizontal only, below header)
-  const edgeSwipe = Gesture.Pan()
-    .activeOffsetX([-14, 14]) // require meaningful horizontal move
-    .failOffsetY([-12, 12])   // fail if vertical motion grows
-    .onStart((e) => {
-      const fromLeftEdge = e.absoluteX < 20;
-      const belowHeader = e.absoluteY > headerTop;
-      if (!drawerOpen && !(fromLeftEdge && belowHeader)) return;
-      dragStartX.value = drawerX.value;
-    })
-    .onUpdate((e) => {
-      const nextX = clamp(dragStartX.value + e.translationX, -DRAWER_WIDTH, 0);
-      drawerX.value = nextX;
-    })
-    .onEnd((_e) => {
-      const shouldOpen = drawerX.value > -DRAWER_WIDTH * 0.6;
-      if (shouldOpen) runOnJS(openDrawer)();
-      else runOnJS(closeDrawer)();
-    });
 
-  const drawerDrag = Gesture.Pan()
-    .activeOffsetX([-14, 14])
-    .failOffsetY([-12, 12])
-    .onStart((_e) => {
-      dragStartX.value = drawerX.value;
-    })
-    .onUpdate((e) => {
-      const nextX = clamp(dragStartX.value + e.translationX, -DRAWER_WIDTH, 0);
-      drawerX.value = nextX;
-    })
-    .onEnd((_e) => {
-      const shouldOpen = drawerX.value > -DRAWER_WIDTH * 0.6;
-      if (shouldOpen) runOnJS(openDrawer)();
-      else runOnJS(closeDrawer)();
-    });
-
-  const drawerStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: drawerX.value }],
-  }));
-
-  const overlayStyle = useAnimatedStyle(() => {
-    const openAmt = 1 - Math.max(0, Math.min(1, Math.abs(drawerX.value) / DRAWER_WIDTH));
-    return { opacity: withTiming(openAmt * 0.5, { duration: 120 }) };
-  });
 
   const toggleFollow = useCallback(
     async (it: LeaderboardItem) => {
@@ -259,11 +288,18 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
   const keyExtractor = useCallback((it: LeaderboardItem) => it.id, []);
 
   return (
+    <GestureDetector gesture={appEdgeSwipe}>
     <View style={styles.container}>
-      <HeaderBar title="Explore" dark onPressNotifications={() => {}} onPressStatus={() => {}} />
+    <HeaderBar
+      title="Explore"
+      dark
+      onPressMenu={openAppDrawer}  // ← global app drawer
+      onPressNotifications={() => Alert.alert('Notifications', 'Coming soon')}
+      onPressStatus={() => {}}
+    />
 
       {/* Edge swipe applies only to content below the header */}
-      <GestureDetector gesture={edgeSwipe}>
+      <GestureDetector gesture={filtersEdgeSwipe}>
         <View style={styles.screen}>
           {loading && items.length === 0 ? (
             <View style={styles.loadingBox}>
@@ -306,13 +342,13 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
                       <Text style={styles.searchBtnText}>Search</Text>
                     </Pressable>
 
-                    <Pressable
-                      onPress={openDrawer}
-                      style={({ pressed }) => [styles.menuBtn, pressed && { opacity: 0.8 }]}
-                      hitSlop={8}
-                      accessibilityRole="button"
-                      accessibilityLabel="Open search options"
-                    >
+                      <Pressable
+                        onPress={openFilters}   // ← local filters drawer
+                        style={({ pressed }) => [styles.menuBtn, pressed && { opacity: 0.8 }]}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Open search options"
+                      >
                       <Ionicons name="options-outline" size={20} color={COLORS.text} />
                     </Pressable>
                   </View>
@@ -343,55 +379,55 @@ export default function ExploreLeaderboardsScreen({ navigation }: any) {
       </GestureDetector>
 
       {/* OVERLAY, below header only */}
-      {drawerOpen && (
+      {filtersOpen && (
         <Pressable
-          onPress={closeDrawer}
+          onPress={closeFilters}
           style={StyleSheet.absoluteFill}
           pointerEvents="auto"
           accessibilityRole="button"
           accessibilityLabel="Close categories menu"
         >
           {/* override top at runtime */}
-          <Animated.View style={[styles.overlay, { top: headerTop }, overlayStyle]} />
+          <Animated.View style={[styles.overlay, { top: headerTop }, filtersOverlayStyle]} />
         </Pressable>
       )}
 
+      
+      {appDrawerOpen && (
+        <Pressable
+          onPress={closeAppDrawer}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="auto"
+        >
+          <Animated.View style={[appDrawerStyles.overlay, appOverlayStyle]} />
+        </Pressable>
+      )}
+      <GestureDetector gesture={appDrawerDrag}>
+        <Animated.View style={[appDrawerStyles.drawer, appDrawerStyle]}>
+          <LeftDrawerPlaceholder onClose={closeAppDrawer} />
+        </Animated.View>
+      </GestureDetector>
+
       {/* DRAWER, below header only */}
-      <GestureDetector gesture={drawerDrag}>
-        <Animated.View style={[styles.drawer, { top: headerTop }, drawerStyle]}>
+      <GestureDetector gesture={filtersDrag}>
+        <Animated.View style={[styles.drawer, { top: headerTop }, filtersDrawerStyle]}>
           <Text style={styles.drawerTitle}>Active Leaderboards</Text>
 
-          <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
-            <Text style={styles.catText}>Current Events</Text>
-          </Pressable>
           <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
             <Text style={styles.catText}>History</Text>
           </Pressable>
           <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
             <Text style={styles.catText}>Math</Text>
           </Pressable>
-          <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
-            <Text style={styles.catText}>Sales/Pitching</Text>
-          </Pressable>
-          <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
-            <Text style={styles.catText}>Augmented Leaderboards</Text>
-          </Pressable>
-          <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
-            <Text style={styles.catText}>Private Leaderboards</Text>
-          </Pressable>
-
-
-          <Pressable style={styles.catItem} onPress={() => { /* TODO */ }}>
-            <Text style={styles.catText}>Job Postings</Text>
-          </Pressable>
 
           <View style={{ height: 14 }} />
-          <Pressable onPress={closeDrawer} style={styles.closeBtn}>
+          <Pressable onPress={closeFilters} style={styles.closeBtn}>
             <Text style={styles.closeBtnText}>Close</Text>
           </Pressable>
         </Animated.View>
       </GestureDetector>
     </View>
+    </GestureDetector>
   );
 }
 
