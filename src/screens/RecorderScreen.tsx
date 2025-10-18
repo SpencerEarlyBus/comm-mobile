@@ -18,6 +18,7 @@ import RecorderSetupPanel from '../components/RecorderSetupPanel';
 import CameraSetupPanel from '../components/CameraSetupUser';
 import RecordingOverlay from '../components/RecordingOverlay';
 import TopicCountdownPanel from '../components/TopicCountdownPanel';
+import MetricDial from '../components/MetricDial';
 import { COLORS } from '../theme/colors';
 import { COLORS as C } from '../theme/colors';
 import type { RootStackParamList } from '../navigation/navRef';
@@ -30,6 +31,7 @@ import { GestureDetector } from 'react-native-gesture-handler';
 import Animated from 'react-native-reanimated';
 import LeftDrawerPlaceholder from '../components/LeftDrawerMainAdditionalNav';
 
+const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://your.backend.root';
 
 const HEADER_ROW_H = 56;
 const DRAWER_WIDTH = 280;
@@ -46,6 +48,17 @@ type FollowedBoard = {
   example_topic?: string | null;
 };
 
+
+
+type TopicInfo = {
+  title: string;
+  prompt: string;
+  duration_sec?: number;             // preferred
+  suggested_duration_sec?: number;   // fallback
+  GradeAcc?: boolean;
+  syncInsights?: boolean;
+};
+
 const CAPTURE_CUTOFF_MS = 60_000;
 const PREVIEW_SECONDS   = 10;
 
@@ -54,7 +67,6 @@ const L = (...args: any[]) => console.log('[Recorder]', ...args);
 
 export default function RecorderScreen() {
   useKeepAwake();
-  L('FUNCTION-INVOKE');
 
   const camRef = useRef<CameraView | null>(null);
   const { setHidden } = useUIChrome();
@@ -66,6 +78,28 @@ export default function RecorderScreen() {
   const [showUpload, setShowUpload] = React.useState(false);
 
   const [cameraKey, setCameraKey] = useState(0);
+
+  const [setupVisible, setSetupVisible] = useState(false);
+
+
+
+
+  // eligibility stuff for session
+
+  type Eligibility = {
+    ok: boolean;
+    allowed: boolean;
+    cooldown_seconds: number;
+    remaining_seconds: number;
+    next_eligible_at: string | null;
+    last_ingest?: { id: string; status: string; created_at: string | null } | null;
+  };
+
+  const [eligibility, setEligibility] = useState<Eligibility | null>(null);
+  const [remainingSec, setRemainingSec] = useState<number | null>(null);
+
+
+
 
   // timers / guards
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -84,6 +118,18 @@ export default function RecorderScreen() {
     if (postStopNudgeRef.current) { clearTimeout(postStopNudgeRef.current); postStopNudgeRef.current = null; }
   };
 
+
+
+
+  //topic info pulled from s3
+  const [captureCutoffMs, setCaptureCutoffMs] = useState<number>(CAPTURE_CUTOFF_MS);
+  const gradeAccRef = useRef<boolean>(false);
+  const syncInsightsRef = useRef<boolean>(false);
+
+
+  //timer refs
+  const captureCutoffMsRef = useRef<number>(CAPTURE_CUTOFF_MS);
+  useEffect(() => { captureCutoffMsRef.current = captureCutoffMs; }, [captureCutoffMs]);
 
   //hamburger stuff 
   const insets = useSafeAreaInsets();
@@ -113,17 +159,14 @@ export default function RecorderScreen() {
   // *** HARD REMOUNT HOOKS ***
   const route = useRoute<RouteProp<RootStackParamList, 'Recorder'>>();
   const remountKey = route.params?.nonce ?? 0;
-  L('ROUTE', { nonce: remountKey, params: route.params });
 
   const clearCutoffTimers = () => {
     if (cutoffWatchdogRef.current) {
-      L('TIMER-CLEAR watchdog', { watchdogId: watchdogIdRef.current });
       clearTimeout(cutoffWatchdogRef.current);
       cutoffWatchdogRef.current = null;
       watchdogIdRef.current = null;
     }
     if (cutoffTickRef.current) {
-      L('TIMER-CLEAR tick', { tickId: tickIdRef.current });
       clearInterval(cutoffTickRef.current);
       cutoffTickRef.current = null;
       tickIdRef.current = null;
@@ -131,11 +174,9 @@ export default function RecorderScreen() {
   };
 
   const forceStopRecording = (why: string) => {
-    L('STOP-RECORDING requested', { why });
     try {
       // @ts-ignore
       camRef.current?.stopRecording?.();
-      L('STOP-RECORDING called successfully');
 
       // If the capture hasn't settled yet, schedule a "nudge" and a watchdog.
       if (!settledCaptureRef.current) {
@@ -145,7 +186,6 @@ export default function RecorderScreen() {
 
         postStopResolveTimerRef.current = setTimeout(() => {
           if (!settledCaptureRef.current) {
-            L('POST-STOP watchdog fired -> hardRemount');
             Alert.alert('Recording did not finalize', 'We could not finalize that clip. Please try again.', [
               { text: 'OK', onPress: hardRemountScreen },
             ]);
@@ -239,12 +279,10 @@ export default function RecorderScreen() {
   const modeRef = useRef(mode);
   useEffect(() => { modeRef.current = mode; L('MODE ->', mode); }, [mode]);
 
-  const API_BASE = process.env.EXPO_PUBLIC_API_BASE;
 
   useEffect(() => {
     const hide = mode !== 'setup';
     setHidden(hide);
-    L('UI-CHROME', { hidden: hide });
     return () => setHidden(false);
   }, [mode, recording, uploading, countdown, setHidden]);
 
@@ -255,7 +293,6 @@ export default function RecorderScreen() {
       cam: (cam?.status as Status) ?? 'unknown',
       mic: (mic?.status as Status) ?? 'unknown',
     });
-    L('PERMS-REFRESH', { cam: cam?.status, mic: mic?.status });
   }, []);
 
   useFocusEffect(useCallback(() => { L('FOCUS'); refreshPerms(); }, [refreshPerms]));
@@ -268,9 +305,7 @@ export default function RecorderScreen() {
   }, [refreshPerms]);
 
   useEffect(() => {
-    L('MOUNT', { remountKey, cameraKey, platform: Platform.OS, ver: Platform.Version });
     return () => {
-      L('UNMOUNT start');
       if (countdownTimer.current) { clearInterval(countdownTimer.current); }
       clearCutoffTimers();
       clearPostStopTimers();
@@ -278,7 +313,6 @@ export default function RecorderScreen() {
       abortedRef.current = true;
       try { camRef.current?.stopRecording?.(); } catch {}
       if (uploadTaskRef.current) uploadTaskRef.current.cancelAsync().catch(() => {});
-      L('UNMOUNT end');
     };
   }, [setHidden]);
 
@@ -306,13 +340,11 @@ export default function RecorderScreen() {
   useEffect(() => { loadFollowed(); }, [loadFollowed]);
 
   const requestBoth = async () => {
-    L('PERMS-REQUEST begin');
     const c = perm.cam === 'granted' ? camPerm : await requestCam();
     const m = perm.mic === 'granted' ? micPerm : await requestMic();
     const camOK = (c?.status ?? perm.cam) === 'granted';
     const micOK = (m?.status ?? perm.mic) === 'granted';
     await refreshPerms();
-    L('PERMS-REQUEST end', { camOK, micOK });
     if (!camOK || !micOK) {
       Alert.alert(
         'Permissions needed',
@@ -324,6 +356,9 @@ export default function RecorderScreen() {
     return true;
   };
 
+
+
+  
   // ******** HARD REMOUNT ********
   const hardRemountScreen = useCallback(() => {
     L('HARD-REMOUNT dispatching');
@@ -347,12 +382,11 @@ export default function RecorderScreen() {
 
     setUploading(true);
     setUploadPct(0);
-    L('UPLOAD begin', { uri });
 
     try {
       const nowTopic = String(assignedTopicRef.current || '');
       const nowTag = leaderboardOptIn ? (selectedLeaderboardTag ?? '') : '';
-
+      const cutoffMs = captureCutoffMsRef.current;
       const metadataText = [
         `email: ${user?.email ?? ''}`,
         `datetime_iso: ${new Date().toISOString()}`,
@@ -360,30 +394,29 @@ export default function RecorderScreen() {
         `organization: ${organization}`,
         `leaderboard_opt_in: ${leaderboardOptIn ? 'true' : 'false'}`,
         `leaderboard_tag: ${nowTag}`,
+        `duration_sec: ${Math.round(cutoffMs / 1000)}`,    
+        `gradeacc: ${gradeAccRef.current ? 'true' : 'false'}`,     
+        `syncinsights: ${syncInsightsRef.current ? 'true' : 'false'}`, 
         `platform: ${Platform.OS} ${Platform.Version}`,
         `app: comm-mobile`,
       ].join('\n');
 
       const token = await getValidAccessToken();
       if (!token) throw new Error('Not authenticated');
-      L('UPLOAD presign POST');
 
       const ext = uri.toLowerCase().endsWith('.mp4') ? 'mp4' : 'mov';
       const createRes = await fetch(`${API_BASE}/media/mobile_create_session?ext=${ext}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
-      L('UPLOAD presign status', createRes.status);
       if (!createRes.ok) {
         const txt = await createRes.text().catch(() => '');
         throw new Error(`create_session ${createRes.status}: ${txt || 'failed'}`);
       }
       const { session_id, video_post, metadata_put_url } = await createRes.json();
-      L('UPLOAD presign ok', { session_id });
 
       if (abortedRef.current) { setUploading(false); L('UPLOAD aborted after presign'); return; }
 
-      L('UPLOAD metadata PUT');
       const metaRes = await fetch(metadata_put_url, {
         method: 'PUT',
         headers: {
@@ -392,7 +425,6 @@ export default function RecorderScreen() {
         },
         body: metadataText,
       });
-      L('UPLOAD metadata status', metaRes.status);
       if (!metaRes.ok) {
         const txt = await metaRes.text().catch(() => '');
         throw new Error(`metadata PUT ${metaRes.status}: ${txt || 'failed'}`);
@@ -408,7 +440,6 @@ export default function RecorderScreen() {
           localSize = (info as any).size as number;
         }
       } catch {}
-      L('UPLOAD local file info', { localSize });
 
       const onProgress = (p: { totalBytesSent: number; totalBytesExpectedToSend: number }) => {
         const expected = p.totalBytesExpectedToSend > 0 ? p.totalBytesExpectedToSend : (localSize ?? -1);
@@ -416,7 +447,6 @@ export default function RecorderScreen() {
         const now = Date.now();
         if (now - progressEmitRef.current > 1000) { // 1s for less spam
           progressEmitRef.current = now;
-          L('UPLOAD progress', { sent: p.totalBytesSent, expected, pct: +(pct * 100).toFixed(1) });
           setUploadPct(pct);
         }
       };
@@ -431,14 +461,12 @@ export default function RecorderScreen() {
       setUploadPct(0);
       progressEmitRef.current = 0;
       setShowUpload(true);
-      L('UPLOAD start S3 POST');
 
       const task = FileSystem.createUploadTask(video_post.url, uri, options, onProgress);
       uploadTaskRef.current = task;
 
       const res = await task.uploadAsync();
       uploadTaskRef.current = null;
-      L('UPLOAD finished S3 POST', { status: res?.status });
 
       if (!res || res.status < 200 || res.status >= 300) {
         throw new Error(`S3 POST ${res?.status}: ${res?.body?.slice(0, 200) || ''}`);
@@ -451,7 +479,6 @@ export default function RecorderScreen() {
       setUploadPct(1);
 
       InteractionManager.runAfterInteractions(() => {
-        L('UPLOAD success -> alert');
         Alert.alert(
           'Uploaded!',
           `Session: ${session_id}\nProcessing will start shortly.`,
@@ -477,34 +504,54 @@ export default function RecorderScreen() {
     hardRemountScreen,
   ]);
 
-  const fetchFirstTopicFromLeaderboard = useCallback(async (tag: string): Promise<string | null> => {
-    L('TOPIC presign begin', { tag });
+
+
+
+  const fetchFirstTopicFromLeaderboard = useCallback(async (tag: string): Promise<TopicInfo | null> => {
     try {
       const presign = await fetchWithAuth(`${API_BASE}/mobile/leaderboards/${encodeURIComponent(tag)}/topics-url`);
-      L('TOPIC presign status', presign.status);
       if (!presign.ok) return null;
+
       const j = await presign.json();
       if (!j?.url) return null;
+
       const blobRes = await fetch(j.url);
-      L('TOPIC blob status', blobRes.status);
       if (!blobRes.ok) return null;
+
       const topicsJson = await blobRes.json();
       const first = topicsJson?.topics?.[0];
-      return (first && first.title) ? (first.title as string) : null;
+      if (!first) return null;
+
+      // Normalize to TopicInfo shape
+      const info: TopicInfo = {
+        title: first.title ?? '',
+        prompt: first.prompt ?? '',
+        duration_sec: (typeof first.duration_sec === 'number' ? first.duration_sec : undefined),
+        suggested_duration_sec: (typeof first.suggested_duration_sec === 'number' ? first.suggested_duration_sec : undefined),
+        GradeAcc: typeof first.GradeAcc === 'boolean' ? first.GradeAcc : undefined,
+        syncInsights: typeof first.syncInsights === 'boolean' ? first.syncInsights : undefined,
+      };
+
+      return info.prompt ? info : null;
     } catch (e) {
       L('TOPIC error', e);
       return null;
     }
   }, [API_BASE, fetchWithAuth]);
 
+
+
+
+
   const startCaptureFlow = useCallback(async () => {
-    L('CAPTURE start');
     clearCutoffTimers();
     clearPostStopTimers();
     abortedRef.current = false;
     uploadStartedRef.current = false;
     settledCaptureRef.current = false;
     setRecording(true);
+
+    const cutoffMs = captureCutoffMsRef.current;
 
     const cam = camRef.current as any;
     L('CAM-METHODS', {
@@ -528,13 +575,11 @@ export default function RecorderScreen() {
       cutoffTickRef.current = setInterval(() => {
         if (abortedRef.current) return;
         const elapsed = Date.now() - startTs;
-        if (elapsed >= CAPTURE_CUTOFF_MS - 200) {
-          L('TICK threshold reached -> forceStop', { id, elapsed });
+        if (elapsed >= cutoffMs - 200) {
           clearCutoffTimers();
           forceStopRecording('tick-threshold');
         }
       }, 250);
-      L('TIMER-SET tick', { id });
     }
 
     // watchdog
@@ -543,17 +588,14 @@ export default function RecorderScreen() {
       watchdogIdRef.current = id;
       cutoffWatchdogRef.current = setTimeout(() => {
         if (!abortedRef.current) {
-          L('WATCHDOG fired -> forceStop', { id });
           forceStopRecording('watchdog');
         }
-      }, CAPTURE_CUTOFF_MS + 750);
-      L('TIMER-SET watchdog', { id });
+      }, cutoffMs + 750);
     }
 
     try {
-      L('RECORD-ASYNC call', { maxDuration: Math.ceil(CAPTURE_CUTOFF_MS / 1000) });
       const p: Promise<{ uri?: string }> = cam?.recordAsync?.({
-        maxDuration: Math.ceil(CAPTURE_CUTOFF_MS / 1000),
+        maxDuration: Math.ceil(cutoffMs / 1000),
       });
 
       let vid: { uri?: string } | undefined;
@@ -565,20 +607,17 @@ export default function RecorderScreen() {
         clearPostStopTimers();
       }
 
-      L('RECORD-ASYNC resolved', { uri: !!vid?.uri });
 
       clearCutoffTimers();
       setRecording(false);
 
       if (abortedRef.current) {
-        L('CAPTURE resolved but aborted -> delete temp');
         if (vid?.uri) { try { await FileSystem.deleteAsync(vid.uri, { idempotent: true }); } catch (e) { L('DELETE temp error', e); } }
         setMode('setup');
         return;
       }
 
       if (!vid?.uri) {
-        L('CAPTURE no uri');
         Alert.alert('No video captured');
         setMode('setup');
         return;
@@ -586,7 +625,6 @@ export default function RecorderScreen() {
 
       if (!uploadStartedRef.current) {
         uploadStartedRef.current = true;
-        L('UPLOAD handoff -> doUpload()');
         await doUpload(vid.uri);
       }
     } catch (e: any) {
@@ -599,6 +637,52 @@ export default function RecorderScreen() {
       Alert.alert('Recording error', e?.message || String(e), [{ text: 'OK', onPress: hardRemountScreen }]);
     }
   }, [doUpload, hardRemountScreen]);
+
+
+
+  //load eligibilty to upload new session
+  const loadEligibility = useCallback(async () => {
+    if (!isAuthenticated) {
+      setEligibility(null);
+      setRemainingSec(null);
+      return;
+    }
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/mobile/recording/eligibility`);
+      if (!res.ok) return;
+      const j: Eligibility = await res.json();
+      setEligibility(j);
+      setRemainingSec(j?.remaining_seconds ?? null);
+    } catch (e) {
+      L('ELIGIBILITY error', e);
+    }
+  }, [API_BASE, fetchWithAuth, isAuthenticated]);
+
+  // Load on focus
+  useFocusEffect(useCallback(() => { loadEligibility(); }, [loadEligibility]));
+
+  // 1s ticker to update remainingSec based on next_eligible_at
+  useEffect(() => {
+    if (!eligibility) return;
+    let raf: number | null = null;
+    let timer: any = null;
+
+    const tick = () => {
+      if (!eligibility?.next_eligible_at) {
+        setRemainingSec(0);
+        return;
+      }
+      const next = Date.parse(eligibility.next_eligible_at);
+      const now = Date.now();
+      const remain = Math.max(0, Math.floor((next - now) / 1000));
+      setRemainingSec(remain);
+    };
+
+    tick();
+    timer = setInterval(tick, 1000);
+    return () => { if (timer) clearInterval(timer); if (raf) cancelAnimationFrame(raf); };
+  }, [eligibility]);
+
 
 
   function UploadProgressModal({
@@ -627,6 +711,18 @@ export default function RecorderScreen() {
     );
   }
 
+
+  function Row({ label, children }: { label: string; children: React.ReactNode }) {
+    return (
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Text style={{ color: COLORS.label }}>{label}</Text>
+        <View>{children}</View>
+      </View>
+    );
+  }
+
+
+
   const granted = perm.cam === 'granted' && perm.mic === 'granted';
   const undetermined = perm.cam === 'undetermined' || perm.mic === 'undetermined';
   const locked = countdown !== null || recording || uploading;
@@ -637,99 +733,223 @@ export default function RecorderScreen() {
 
   let content: React.ReactElement | null = null;
 
+
+  //info for recorder setup panel
+  const handleReady = useCallback(async () => {
+      // Gate on daily quota
+    if (eligibility && eligibility.allowed === false) {
+      const mins = remainingSec != null ? Math.ceil(remainingSec / 60) : null;
+      Alert.alert(
+        'Daily limit',
+        mins != null
+          ? `You can record again in ~${mins} minute${mins === 1 ? '' : 's'}.`
+          : 'You can record again later today.'
+      );
+      return;
+    }
+    
+    if (!authReady || !isAuthenticated) { 
+      Alert.alert('Please sign in', 'You must be logged in to record.'); 
+      return; 
+    }
+    if (prepping) return;
+
+    if (leaderboardOptIn) {
+      if (!selectedLeaderboardTag) {
+        Alert.alert('Select a leaderboard', 'Pick a leaderboard to get your topic.');
+        return;
+      }
+      try {
+        setPrepping(true);
+        const t = await fetchFirstTopicFromLeaderboard(selectedLeaderboardTag);
+        if (!t) {
+          Alert.alert('No topics available', 'This leaderboard has no topics configured yet.');
+          return;
+        }
+
+        // Set title
+        setAssignedTopic(t.prompt);
+        setTopic(t.prompt);
+
+        // Set recording duration from topic (prefer duration_sec; fallback suggested_duration_sec; else 60s)
+        const secs =
+          (Number.isFinite(t.duration_sec) && (t.duration_sec as number) > 0)
+            ? (t.duration_sec as number)
+            : (Number.isFinite(t.suggested_duration_sec) && (t.suggested_duration_sec as number) > 0)
+              ? (t.suggested_duration_sec as number)
+              : 60;
+
+        setCaptureCutoffMs(Math.max(10, secs) * 1000); // clamp a little just in case
+
+        // Set flags for metadata
+        gradeAccRef.current = !!t.GradeAcc;
+        syncInsightsRef.current = !!t.syncInsights;
+      } finally {
+        setPrepping(false);
+      }
+    } else {
+      setTopic('');
+      setAssignedTopic('');
+      setCaptureCutoffMs(CAPTURE_CUTOFF_MS);
+      gradeAccRef.current = false;
+      syncInsightsRef.current = false;
+    }
+
+
+    const ok = await requestBoth();
+    if (!ok) return;
+
+    setMode('preview');
+    setCountdown(PREVIEW_SECONDS);
+
+    if (countdownTimer.current) clearInterval(countdownTimer.current);
+    {
+      const id = idSeq.current++;
+      countdownIdRef.current = id;
+      countdownTimer.current = setInterval(() => {
+        setCountdown((prev) => (prev && prev > 1 ? prev - 1 : null));
+      }, 1000);
+    }
+
+    if (previewKickoffTimer.current) clearTimeout(previewKickoffTimer.current);
+    {
+      const id = idSeq.current++;
+      previewKickIdRef.current = id;
+      previewKickoffTimer.current = setTimeout(() => {
+        if (countdownTimer.current) { clearInterval(countdownTimer.current); countdownTimer.current = null; }
+        setCountdown(null);
+
+        // bump to force a fresh CameraView instance each capture
+        setCameraKey(k => k + 1);
+
+        setMode('capture');
+        // small delay to let CameraView mount fully
+        setTimeout(() => startCaptureFlow(), 150);
+      }, PREVIEW_SECONDS * 1000);
+    }
+  }, [
+    eligibility, remainingSec,
+    authReady, isAuthenticated, prepping, leaderboardOptIn, selectedLeaderboardTag,
+    fetchFirstTopicFromLeaderboard, requestBoth, setPrepping, setAssignedTopic, setTopic,
+    setMode, setCountdown, idSeq, countdownTimer, previewKickoffTimer, startCaptureFlow
+  ]);
+
+  function fmtHMS(total: number) {
+    const t = Math.max(0, total|0);
+    const h = Math.floor(t / 3600);
+    const m = Math.floor((t % 3600) / 60);
+    const s = t % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  }
+
+  const cooldownTotal = eligibility?.cooldown_seconds ?? (24 * 3600);
+  const remain = remainingSec ?? 0;
+  const readyNow = eligibility ? eligibility.allowed && remain <= 0 : true;
+  const progressPct = readyNow ? 100 : Math.round(100 - (remain / cooldownTotal) * 100);
+
+
+
+
+
   if (mode === 'setup') {
     content = (
       <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
         <HeaderBar
           title="Record"
-          onPressMenu={openDrawer}  
+          onPressMenu={openDrawer}
           onPressNotifications={() => Alert.alert('Notifications', 'Coming soon')}
           onPressStatus={() => Alert.alert('Recorder', 'Recorder status')}
           dark
         />
-        <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-          <RecorderSetupPanel
-            organization={organization}
-            setOrganization={setOrganization}
-            leaderboardOptIn={leaderboardOptIn}
-            setLeaderboardOptIn={(v) => {
-              setLeaderboardOptIn(v);
-              if (!v) setSelectedLeaderboardTag(null);
-              else if (v && !selectedLeaderboardTag && followedBoards.length) {
-                setSelectedLeaderboardTag(followedBoards[0].tag);
+        <ScrollView contentContainerStyle={{ flexGrow: 1, padding: 16, gap: 12 }}>
+          {/* Quick summary of current setup */}
+          <Text style={{ color: COLORS.label, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Current setup
+          </Text>
+          <View style={{ backgroundColor: COLORS.card, borderColor: COLORS.border, borderWidth: 1, borderRadius: 14, padding: 12, gap: 6 }}>
+            <Row label="Leaderboard">
+              <Text style={{ color: COLORS.text, fontWeight: '800' }}>
+                {leaderboardOptIn
+                  ? (followedBoards.find(b => b.tag === selectedLeaderboardTag)?.name || 'Choose in Setup')
+                  : 'Opted out'}
+              </Text>
+            </Row>
+            {!!organization && (
+              <Row label="Organization">
+                <Text style={{ color: COLORS.text }}>{organization}</Text>
+              </Row>
+            )}
+          </View>
+
+
+          <View style={{ alignItems: 'center', marginTop: 6, marginBottom: 4 }}>
+            <MetricDial
+              label={readyNow ? 'Ready to record' : 'Next session window'}
+              value={progressPct}
+              size={200}
+              stroke={12}
+              active={readyNow}
+              showLabel={!readyNow}
+              center={
+                readyNow
+                  ? <Text style={{ color: COLORS.text, fontWeight: '800', fontSize: 18 }}>Ready!</Text>
+                  : <Text style={{ color: COLORS.text, fontWeight: '800', fontSize: 16 }}>{fmtHMS(remain)}</Text>
               }
-            }}
-            granted={granted}
-            undetermined={undetermined}
-            onRequestPerms={() => { if (undetermined) requestBoth(); else Linking.openSettings(); }}
-            followedBoards={followedBoards}
-            selectedLeaderboardTag={selectedLeaderboardTag}
-            setSelectedLeaderboardTag={setSelectedLeaderboardTag}
-            onOpenCameraSetup={() => setMode('calibrate')}
-            onReady={async () => {
-              L('READY pressed');
-              if (!authReady || !isAuthenticated) { Alert.alert('Please sign in', 'You must be logged in to record.'); return; }
-              if (prepping) return;
+            />
+            {!readyNow && (
+              <Text style={{ color: COLORS.label, marginTop: 6 }}>
+                You can start a new session once this reaches 100%.
+              </Text>
+            )}
+          </View>
 
-              if (leaderboardOptIn) {
-                if (!selectedLeaderboardTag) { Alert.alert('Select a leaderboard', 'Pick a leaderboard to get your topic.'); return; }
-                try {
-                  setPrepping(true);
-                  const t = await fetchFirstTopicFromLeaderboard(selectedLeaderboardTag);
-                  if (!t) { Alert.alert('No topics available', 'This leaderboard has no topics configured yet.'); return; }
-                  setAssignedTopic(t);
-                  setTopic(t);
-                  L('TOPIC set', t);
-                } finally { setPrepping(false); }
-              } else {
-                setTopic('');
-                setAssignedTopic('');
-              }
 
-              const ok = await requestBoth();
-              if (!ok) return;
+          {/* Camera setup button (stays on RecorderScreen) */}
+          <Pressable
+            onPress={() => setMode('calibrate')}
+            style={({ pressed }) => [
+              localStyles.calBtnMain,
+              pressed && { transform: [{ scale: 0.98 }], opacity: 0.96 },
+            ]}
+          >
+            <Text style={localStyles.calBtnMainText}>Camera Setup</Text>
+          </Pressable>
 
-              setMode('preview');
-              setCountdown(PREVIEW_SECONDS);
 
-              if (countdownTimer.current) clearInterval(countdownTimer.current);
-              {
-                const id = idSeq.current++;
-                countdownIdRef.current = id;
-                countdownTimer.current = setInterval(() => {
-                  setCountdown((prev) => (prev && prev > 1 ? prev - 1 : null));
-                }, 1000);
-                L('TIMER-SET countdown', { id });
-              }
+          {/* Open Setup modal */}
+          <Pressable
+            onPress={() => setSetupVisible(true)}
+            style={({ pressed }) => [
+              localStyles.setupBtn,
+              pressed && { transform: [{ scale: 0.98 }], opacity: 0.96 },
+            ]}
+          >
+            <Text style={localStyles.setupBtnText}>Select Topic</Text>
+          </Pressable>
 
-              if (previewKickoffTimer.current) clearTimeout(previewKickoffTimer.current);
-              {
-                const id = idSeq.current++;
-                previewKickIdRef.current = id;
-                previewKickoffTimer.current = setTimeout(() => {
-                  if (countdownTimer.current) { clearInterval(countdownTimer.current); countdownTimer.current = null; }
-                  setCountdown(null);
-
-                  // NEW: bump to force a fresh CameraView instance each capture
-                  setCameraKey(k => k + 1);
-
-                  setMode('capture');
-                  // small delay to let CameraView mount fully
-                  setTimeout(() => startCaptureFlow(), 150);
-                }, PREVIEW_SECONDS * 1000);
-                L('TIMER-SET previewKick', { id });
-              }
-            }}
-            readyDisabled={!authReady || !isAuthenticated || prepping}
-          />
+          {/* Ready button (uses the extracted handler) */}
+          <Pressable
+            onPress={handleReady}
+            disabled={!authReady || !isAuthenticated || prepping || !readyNow}
+            style={({ pressed }) => [
+              localStyles.readyBtn,
+              (!authReady || !isAuthenticated || prepping || !readyNow) && { opacity: 0.5 },
+              pressed && authReady && isAuthenticated && !prepping && readyNow && { transform: [{ scale: 0.98 }], opacity: 0.96 },
+            ]}
+          >
+            <Text style={localStyles.readyText}>
+              {!authReady || !isAuthenticated
+                ? 'Please sign in…'
+                : (prepping ? 'Please wait…' : (readyNow ? 'Start Recording!' : 'Daily Limit Active'))}
+            </Text>
+          </Pressable>
         </ScrollView>
       </View>
-
-
-
-
-
     );
+
+
   } else if (mode === 'preview') {
     content = (
       <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
@@ -803,6 +1023,65 @@ export default function RecorderScreen() {
 
       {/* Upload modal unchanged */}
       <UploadProgressModal visible={showUpload} pct={uploadPct} onCancel={abortAll} />
+
+
+
+      {/* Setup Modal (popup overlay) */}
+      <Modal
+        visible={setupVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setSetupVisible(false)}
+      >
+        <Pressable
+          style={localStyles.overlay}
+          onPress={() => setSetupVisible(false)}
+        >
+          {/* Stop press-through so taps inside card don't dismiss */}
+          <Pressable style={localStyles.popupCard} onPress={() => {}}>
+            <View style={localStyles.popupHeader}>
+              <Text style={localStyles.popupTitle}>Setup</Text>
+              <Pressable onPress={() => setSetupVisible(false)} style={{ padding: 8 }}>
+                <Text style={localStyles.popupAction}>Done</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView contentContainerStyle={{ paddingBottom: 8 }}>
+              <RecorderSetupPanel
+                organization={organization}
+                setOrganization={setOrganization}
+                leaderboardOptIn={leaderboardOptIn}
+                setLeaderboardOptIn={(v) => {
+                  setLeaderboardOptIn(v);
+                  if (!v) setSelectedLeaderboardTag(null);
+                  else if (v && !selectedLeaderboardTag && followedBoards.length) {
+                    setSelectedLeaderboardTag(followedBoards[0].tag);
+                  }
+                }}
+                granted={granted}
+                undetermined={undetermined}
+                onRequestPerms={() => { if (undetermined) requestBoth(); else Linking.openSettings(); }}
+                followedBoards={followedBoards}
+                selectedLeaderboardTag={selectedLeaderboardTag}
+                setSelectedLeaderboardTag={setSelectedLeaderboardTag}
+
+                /* Hide internal buttons: Ready + Camera setup (they live on the main screen) */
+                onOpenCameraSetup={() => {}}
+                onReady={() => {}} 
+                hideReady
+                hideCameraSetup
+                readyDisabled
+              />
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+
+
+
+
     </View>
   );
 
@@ -811,3 +1090,69 @@ export default function RecorderScreen() {
 const styles = StyleSheet.create({
   bottomBar: { position: 'absolute', bottom: 30, alignSelf: 'center' },
 });
+const localStyles = StyleSheet.create({
+  setupBtn: {
+    marginTop: 8,
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  setupBtnText: { color: COLORS.text, fontWeight: '800' },
+
+  readyBtn: {
+    marginTop: 8,
+    backgroundColor: COLORS.accent,
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  readyText: { color: COLORS.white, fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
+
+  calBtnMain: {
+  marginTop: 8,
+  backgroundColor: COLORS.card,
+  borderColor: COLORS.border,
+  borderWidth: 1,
+  borderRadius: 999,
+  paddingVertical: 12,
+  alignItems: 'center',
+},
+calBtnMainText: { color: COLORS.text, fontWeight: '800' },
+
+overlay: {
+  flex: 1,
+  backgroundColor: 'rgba(0,0,0,0.6)',
+  justifyContent: 'center',
+  alignItems: 'center',
+  padding: 16,
+},
+popupCard: {
+  width: '100%',
+  maxWidth: 520,
+  maxHeight: '85%',
+  backgroundColor: COLORS.bg,
+  borderRadius: 16,
+  borderWidth: 1,
+  borderColor: COLORS.border,
+  padding: 12,
+  shadowColor: '#000',
+  shadowOpacity: 0.3,
+  shadowRadius: 18,
+  shadowOffset: { width: 0, height: 10 },
+  elevation: 10,
+},
+popupHeader: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  marginBottom: 8,
+},
+popupTitle: { color: COLORS.text, fontSize: 18, fontWeight: '800' },
+popupAction: { color: COLORS.accent, fontWeight: '800' },
+
+
+});
+

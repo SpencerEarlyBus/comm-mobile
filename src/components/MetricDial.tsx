@@ -8,13 +8,13 @@ const COLORS = {
   label: '#cbd5e1',
   track: 'rgba(148,163,184,0.25)',
   ringBg: 'rgba(15,23,42,0.85)',
-  activeArc: '#FFC107',
-  activeLabelBg: '#FFC107',
+  activeArc: '#5eb718',
+  activeLabelBg: '#5eb718',
   activeLabelText: '#0b1220',
 };
 
 type Props = {
-  label: string;
+  label?: string;
   /** Arc fill percentage (0..100) */
   value: number;
   size?: number;
@@ -25,6 +25,7 @@ type Props = {
   showValue?: boolean;
   /** NEW: custom center content (e.g., 4-digit ELO) */
   center?: React.ReactNode;
+  showLabel?: boolean; 
 };
 
 export default function MetricDial({
@@ -36,6 +37,7 @@ export default function MetricDial({
   onPress,
   showValue = true,
   center,
+  showLabel = true, 
 }: Props) {
   const clamped = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
   const radius = (size - stroke) / 2;
@@ -97,28 +99,30 @@ export default function MetricDial({
       </View>
 
       {/* Label */}
-      <View
-        style={[
-          styles.labelWrap,
-          active && {
-            backgroundColor: COLORS.activeLabelBg,
-            borderRadius: 999,
-            paddingHorizontal: 10,
-            paddingVertical: 4,
-          },
-          { width: size },
-        ]}
-      >
-        <Text
-          numberOfLines={1}
+      {showLabel && !!label && (
+        <View
           style={[
-            styles.label,
-            { color: active ? COLORS.activeLabelText : COLORS.label, fontWeight: active ? '800' : '600' },
+            styles.labelWrap,
+            active && {
+              backgroundColor: COLORS.activeLabelBg,
+              borderRadius: 999,
+              paddingHorizontal: 10,
+              paddingVertical: 4,
+            },
+            { width: size },
           ]}
         >
-          {label}
-        </Text>
-      </View>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.label,
+              { color: active ? COLORS.activeLabelText : COLORS.label, fontWeight: active ? '800' : '600' },
+            ]}
+          >
+            {label}
+          </Text>
+        </View>
+      )}
     </Pressable>
   );
 }

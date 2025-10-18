@@ -23,7 +23,8 @@ type Props = {
   setSelectedLeaderboardTag: (tag: string | null) => void;
 
   onOpenCameraSetup: () => void; 
-
+  hideReady?: boolean;
+  hideCameraSetup?: boolean;
 };
 
 export default function RecorderSetupPanel({
@@ -32,7 +33,8 @@ export default function RecorderSetupPanel({
   granted, undetermined,
   onRequestPerms, onReady, readyDisabled,
   followedBoards, selectedLeaderboardTag, setSelectedLeaderboardTag,
-  onOpenCameraSetup,
+  onOpenCameraSetup, hideReady, hideCameraSetup
+  
 }: Props) {
   const hasFollows = followedBoards?.length > 0;
 
@@ -111,27 +113,31 @@ export default function RecorderSetupPanel({
       <View style={{ height: 12 }} />
 
 
-      <Pressable
-        onPress={onOpenCameraSetup}
-        style={({ pressed }) => [
-          styles.calBtn,
-          pressed && { transform: [{ scale: 0.98 }], opacity: 0.96 },
-        ]}
-      >
-        <Text style={styles.calBtnText}>Camera setup</Text>
-      </Pressable>
+      {!hideCameraSetup && (
+        <Pressable
+          onPress={onOpenCameraSetup}
+          style={({ pressed }) => [
+            styles.calBtn,
+            pressed && { transform: [{ scale: 0.98 }], opacity: 0.96 },
+          ]}
+        >
+          <Text style={styles.calBtnText}>Camera Setup</Text>
+        </Pressable>
+      )}
 
-      <Pressable
-        onPress={onReady}
-        disabled={readyDisabled}
-        style={({ pressed }) => [
-          styles.readyBtn,
-          readyDisabled && { opacity: 0.5 },
-          pressed && !readyDisabled && { transform: [{ scale: 0.98 }], opacity: 0.96 },
-        ]}
-      >
-        <Text style={styles.readyText}>{readyDisabled ? 'Please wait…' : 'Ready'}</Text>
-      </Pressable>
+      {!hideReady && (
+        <Pressable
+          onPress={onReady}
+          disabled={readyDisabled}
+          style={({ pressed }) => [
+            styles.readyBtn,
+            readyDisabled && { opacity: 0.5 },
+            pressed && !readyDisabled && { transform: [{ scale: 0.98 }], opacity: 0.96 },
+          ]}
+        >
+          <Text style={styles.readyText}>{readyDisabled ? 'Please wait…' : 'Ready' }</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
